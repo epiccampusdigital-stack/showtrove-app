@@ -232,6 +232,14 @@ ipcMain.handle('fix-match', async (_e, { id, tmdbId, type }) => {
   await fetchMeta();
   return store.data.items[id];
 });
+// Flags: priority labels the user puts on titles (high / medium / low, or null to clear)
+ipcMain.handle('set-flag', (_e, { id, level }) => {
+  const it = store.data.items[id]; if (!it) return null;
+  if (['high', 'medium', 'low'].includes(level)) it.flag = { level, at: it.flag?.level === level ? it.flag.at : Date.now() };
+  else delete it.flag;
+  store.save();
+  return it;
+});
 ipcMain.handle('mark-watched', (_e, { file, watched }) => {
   if (watched) store.data.progress[file] = { pos: 1, dur: 1, at: Date.now(), watched: true };
   else delete store.data.progress[file];

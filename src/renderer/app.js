@@ -5,7 +5,7 @@
 const S = {
   items: [], progress: {}, settings: {}, players: [], folders: [], online: true,
   view: 'home', lastView: 'home', query: '',
-  lib: { movies: { genre: 'All', sort: 'added', year: 'all', hidden: false }, tv: { genre: 'All', sort: 'added', year: 'all' } },
+  lib: { movies: { genre: 'All', sort: 'added', year: 'all', hidden: false, flag: 'off' }, tv: { genre: 'All', sort: 'added', year: 'all', flag: 'off' } },
   hiddenUnlocked: false,
   metaBusy: false, detailId: null, firstPaint: true
 };
@@ -14,6 +14,10 @@ const byId = id => (S.allItems || S.items).find(i => i.id === id);
 const isHidden = i => i.hidden === true || (i.hidden !== false && S.settings?.autoHideAdult !== false && (i.autoAdult || i.meta?.adult));
 const hasArt = i => !!(i.meta?.poster || i.meta?.backdrop);
 const artFirst = list => [...list.filter(hasArt), ...list.filter(i => !hasArt(i))];
+const FLAGS = { high: 'High', medium: 'Medium', low: 'Low' };
+const FLAG_RANK = { high: 0, medium: 1, low: 2 };
+const byFlag = (a, b) => FLAG_RANK[a.flag.level] - FLAG_RANK[b.flag.level] || b.flag.at - a.flag.at;
+const flagged = (list = S.items) => list.filter(i => i.flag?.level).sort(byFlag);
 const NEW_DAYS = 14;
 const isNew = i => Date.now() - addedAt(i) < NEW_DAYS * 864e5 && !watchedAll(i);
 function splitItems() {
@@ -111,6 +115,8 @@ function cardHtml(it, i = 0, land = false) {
       ${watchedAll(it) ? `<span class="watched" title="Watched">${icon('check')}</span>` : (isNew(it) ? '<span class="new-badge">New</span>' : '')}
       ${f > 0.01 && f < 0.95 ? `<span class="progress"><i style="transform:scaleX(${f})"></i></span>` : ''}
       <span class="play-chip">${icon('play')}</span>
+      ${it.flag?.level ? `<span class="flag-label p-${it.flag.level}">${icon('flag')}${FLAGS[it.flag.level]}</span>` : ''}
+      <span class="flag-btn ${it.flag?.level ? 'on p-' + it.flag.level : ''}" data-flag="${esc(it.id)}" role="button" tabindex="0" aria-label="Flag ${esc(m.title || it.title)}" title="Flag">${icon('flag')}</span>
     </div>
     <div class="cap"><b>${esc(m.title || it.title)}</b><small>${esc(sub)}</small></div>
   </button>`;
@@ -194,6 +200,8 @@ function homeHtml() {
   }
   const L = (it, i) => cardHtml(it, i, true);
   if (cont.length) out += rowHtml('Continue watching', cont.map(wideCardHtml).join(''));
+  const flags = flagged(all);
+  if (flags.length) out += rowHtml(`Flagged · ${flags.length}`, flags.slice(0, 30).map((it, i) => cardHtml(it, i)).join(''), 'flagged');
   if (fresh.length) out += rowHtml(`Newly added · ${fresh.length}`, fresh.slice(0, 30).map(L).join(''), 'new');
   if (rated.length >= 4) out += spotlightHtml(rated);
   if (!fresh.length) out += rowHtml('Recently added', recent.map(L).join(''));
@@ -373,6 +381,7 @@ function libraryHtml(kind) {
   const yr = i => +(i.meta?.year || i.year) || 0;
   const years = [...new Set(pool.map(yr).filter(Boolean))].sort((a, b) => b - a);
   const decades = [...new Set(years.map(y => Math.floor(y / 10) * 10))];
+  if (f.flag !== 'off') list = list.filter(i => i.flag?.level && (f.flag === 'all' || i.flag.level === f.flag));
   if (f.year !== 'all') {
     const [kindY, n] = [f.year[0], +f.year.slice(1)];
     list = list.filter(i => kindY === 'd' ? Math.floor(yr(i) / 10) * 10 === n : yr(i) === n);
@@ -384,6 +393,7 @@ function libraryHtml(kind) {
     rating: (a, b) => (ratingValue(b) || 0) - (ratingValue(a) || 0)
   };
   list = artFirst([...list].sort(sorters[f.sort]));
+  if (f.flag !== 'off' && f.sort === 'added') list.sort(byFlag); // flagged view: highest priority first
   const label = showHidden ? 'Hidden' : kind === 'tv' ? 'TV shows' : 'Movies';
   const noun = kind === 'tv' ? (list.length === 1 ? 'show' : 'shows') : (list.length === 1 ? 'movie' : 'movies');
   const yearSel = `<label class="select"><span>Year</span><select id="yearSel">
@@ -394,7 +404,7 @@ function libraryHtml(kind) {
   return `<div class="page">
     <div class="page-head"><h1>${label}</h1><span class="count">${list.length} ${noun}</span>
       ${showHidden ? `<button class="btn quiet sm" data-act="lock">${icon('lock')}Lock and go back</button>` : ''}</div>
-    ${pool.length ? `<div class="toolbar">${hiddenTab}
+    ${pool.length ? `<div class="toolbar">${hiddenTab}${flagChips(pool, f)}
       <div class="chips" role="group" aria-label="Filter by genre">${genres.map(g => `<button class="chip" data-genre="${esc(g)}" aria-pressed="${g === f.genre}">${esc(g)}</button>`).join('')}</div>
       <label class="select"><span>Sort by</span><select id="sortSel">
         <option value="added" ${f.sort === 'added' ? 'selected' : ''}>Recently added</option>
@@ -443,6 +453,10 @@ function bindCommon(root) {
 
 // One delegated click handler for the whole app
 document.addEventListener('click', e => {
+  const fb = e.target.closest('[data-flag]');
+  if (fb) { e.preventDefault(); e.stopPropagation(); return openFlagMenu(fb.dataset.flag, fb); }
+  const fl = e.target.closest('[data-flagf]');
+  if (fl) { S.lib[S.view].flag = fl.dataset.flagf; return render(); }
   const t = e.target.closest('[data-play],[data-open],[data-act],[data-goto],[data-genre],.card');
   if (!t || t.closest('.spot-track, .shelf')) return;
   if (t.dataset.play !== undefined) {
@@ -465,6 +479,7 @@ document.addEventListener('click', e => {
 /* ================= Navigation ================= */
 function go(view) {
   if (view !== 'movies' && S.hiddenUnlocked) { S.hiddenUnlocked = false; S.lib.movies.hidden = false; } // leaving Movies locks Hidden again
+  if (view === 'flagged') { S.lib.movies.flag = 'all'; S.lib.tv.flag = 'all'; view = S.items.some(i => i.type === 'movie' && i.flag) ? 'movies' : 'tv'; }
   if (view === 'new') { S.lib.movies.sort = 'added'; S.lib.movies.year = 'all'; view = 'movies'; }
   if (view === S.view && view !== 'search') { window.scrollTo({ top: 0, behavior: 'smooth' }); return; }
   const from = VIEWS.indexOf(S.view), to = VIEWS.indexOf(view);
@@ -581,6 +596,7 @@ function openDetail(id, { keepSeason } = {}) {
         ${m.trailerKey ? `<button class="btn ghost" id="dTrailer">${icon('trailer')}Trailer</button>` : ''}
         ${it.type === 'movie' ? `<button class="btn quiet" id="dWatched">${icon(watchedAll(it) ? 'check' : 'eye')}${watchedAll(it) ? 'Watched' : 'Mark as watched'}</button>` : ''}
         <button class="btn quiet" id="dFix">${icon('wand')}Fix match</button>
+        <button class="btn quiet ${it.flag?.level ? 'flag-on p-' + it.flag.level : ''}" id="dFlag" data-flag="${esc(it.id)}">${icon('flag')}${it.flag?.level ? FLAGS[it.flag.level] + ' priority' : 'Flag'}</button>
         <button class="btn quiet" id="dHide">${icon(isHidden(it) ? 'eye' : 'lock')}${isHidden(it) ? 'Unhide' : 'Hide'}</button>
         <button class="btn quiet" id="dRefresh">${icon('refresh')}Refresh info</button>
       </div>
@@ -883,6 +899,47 @@ function openSettings(tab = 'general') {
     });
     applyState(st); closeModal(); toast('Settings saved', 'ok');
   };
+}
+
+/* ---------- Flags ---------- */
+function flagChips(pool, f) {
+  const n = pool.filter(i => i.flag?.level).length;
+  if (!n && f.flag === 'off') return '';
+  const on = f.flag !== 'off';
+  return `<div class="chips flag-chips" role="group" aria-label="Flags">
+    <button class="chip" data-flagf="${on ? 'off' : 'all'}" aria-pressed="${on}">${icon('flag')}Flagged · ${n}</button>
+    ${on ? Object.entries(FLAGS).map(([k, l]) => `<button class="chip p-${k}" data-flagf="${f.flag === k ? 'all' : k}" aria-pressed="${f.flag === k}"><i class="dot"></i>${l}</button>`).join('') : ''}
+  </div>`;
+}
+function openFlagMenu(id, anchor) {
+  document.querySelector('.flag-menu')?.remove();
+  const it = byId(id); if (!it) return;
+  const cur = it.flag?.level || null;
+  const menu = html(`<div class="flag-menu" role="menu">
+    <small>Flag as</small>
+    ${Object.entries(FLAGS).map(([k, l]) => `<button role="menuitemradio" aria-checked="${cur === k}" data-lv="${k}" class="p-${k}"><i class="dot"></i>${l} priority${cur === k ? icon('check') : ''}</button>`).join('')}
+    ${cur ? `<button data-lv="" class="clear">${icon('x')}Remove flag</button>` : ''}
+  </div>`);
+  document.body.append(menu);
+  const r = anchor.getBoundingClientRect();
+  const mw = menu.offsetWidth, mh = menu.offsetHeight;
+  menu.style.left = Math.min(window.innerWidth - mw - 12, Math.max(12, r.left)) + 'px';
+  menu.style.top = (r.bottom + mh + 8 > window.innerHeight ? r.top - mh - 8 : r.bottom + 8) + 'px';
+  const close = () => { menu.remove(); document.removeEventListener('pointerdown', outside, true); };
+  const outside = ev => { if (!menu.contains(ev.target)) close(); };
+  setTimeout(() => document.addEventListener('pointerdown', outside, true), 0);
+  menu.querySelectorAll('[data-lv]').forEach(b => b.onclick = async ev => {
+    ev.stopPropagation();
+    const lv = b.dataset.lv || null;
+    close();
+    const upd = await api.setFlag(id, lv);
+    if (!upd) return;
+    const i = S.allItems.findIndex(x => x.id === id); if (i >= 0) S.allItems[i] = upd;
+    splitItems();
+    if (S.detailId === id) openDetail(id, { keepSeason: +($('#detailLayer [data-season][aria-pressed="true"]')?.dataset.season) || undefined });
+    const y = window.scrollY; render(); window.scrollTo(0, y);
+    toast(lv ? `Flagged · ${FLAGS[lv]} priority` : 'Flag removed', 'ok');
+  });
 }
 
 /* ---------- Hidden titles: PIN lock ---------- */

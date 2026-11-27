@@ -884,3 +884,30 @@ body.no-hero-auto .tile .timer { display: none; }
 .pin-k:active { transform: scale(.96); }
 .pin-k[data-k="✓"] { background: var(--accent); color: var(--on-accent); }
 .err { color: oklch(0.72 0.17 25); font-size: 14px; }
+
+/* ---------- Flags ---------- */
+:root { --p-high: oklch(0.7 0.19 25); --p-medium: oklch(0.8 0.15 75); --p-low: oklch(0.72 0.13 240); }
+.p-high { --pc: var(--p-high); } .p-medium { --pc: var(--p-medium); } .p-low { --pc: var(--p-low); }
+.flag-label { position: absolute; left: 10px; bottom: 10px; z-index: 2; display: inline-flex; align-items: center; gap: 5px; padding: 4px 9px 4px 7px; border-radius: 99px; font: 600 11.5px/1 var(--font-ui); color: #0b0b0f; background: var(--pc); box-shadow: 0 4px 14px oklch(0 0 0 / .4); }
+.flag-label .ic { width: 12px; height: 12px; stroke-width: 2.4; }
+.card.land .flag-label { bottom: auto; top: 10px; left: auto; right: 64px; }
+.flag-btn { position: absolute; right: 10px; bottom: 10px; z-index: 3; display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; background: oklch(0.15 0.01 260 / .7); backdrop-filter: blur(10px); box-shadow: inset 0 0 0 1px oklch(1 0 0 / .15); opacity: 0; transform: scale(.9); transition: opacity var(--t-fast), transform var(--t-fast), background var(--t-fast); cursor: pointer; }
+.flag-btn .ic { width: 16px; height: 16px; }
+.card:hover .flag-btn, .card:focus-visible .flag-btn, .flag-btn:focus-visible { opacity: 1; transform: none; }
+.flag-btn:hover { background: oklch(0.25 0.01 260 / .9); }
+.flag-btn.on .ic { color: var(--pc); }
+.card.land .flag-btn { bottom: auto; top: 10px; right: 10px; }
+.flag-menu { position: fixed; z-index: 200; min-width: 200px; padding: 8px; border-radius: 16px; background: var(--surface-3); box-shadow: var(--sh-3), inset 0 0 0 1px var(--line-2); display: grid; gap: 2px; animation: toastIn 180ms var(--ease-out) both; }
+.flag-menu small { padding: 6px 10px 4px; color: var(--text-3); font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
+.flag-menu button { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 10px; font-size: 14px; text-align: left; }
+.flag-menu button:hover { background: oklch(1 0 0 / .08); }
+.flag-menu button .ic { margin-left: auto; width: 16px; height: 16px; }
+.flag-menu .clear { color: var(--text-3); border-top: 1px solid var(--line); border-radius: 0 0 10px 10px; margin-top: 4px; }
+.flag-menu .clear .ic { margin-left: 0; }
+.dot { width: 10px; height: 10px; border-radius: 50%; background: var(--pc); flex: none; display: inline-block; }
+.flag-chips { display: flex; gap: 6px; }
+.flag-chips .chip { display: inline-flex; align-items: center; gap: 7px; }
+.flag-chips .chip .ic { width: 15px; height: 15px; }
+.btn.flag-on .ic { color: var(--pc); }
+.card .flag-label { bottom: 18px; }
+.flag-chips { flex: none; overflow: visible; -webkit-mask-image: none; mask-image: none; padding-right: 6px; border-right: 1px solid var(--line); margin-right: 4px; }
