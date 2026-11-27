@@ -204,7 +204,8 @@ function homeHtml() {
 
 /* ---------- Hero: full-screen artwork, shelf of titles along the bottom (Apple TV / PS5) ---------- */
 let heroList = [], heroIdx = 0, heroTimer = 0, heroManual = false, hoverT = 0;
-const HERO_MS = 9000;
+const heroMs = () => (+S.settings?.heroSpeed || 9) * 1000;
+const heroAuto = () => S.settings?.heroAutoplay !== false;
 function heroHtml() {
   const pool = S.items.filter(i => i.meta?.backdrop).length ? S.items.filter(i => i.meta?.backdrop) : S.items;
   const rated = [...pool].sort((a, b) => (ratingValue(b) || 0) - (ratingValue(a) || 0));
@@ -217,7 +218,7 @@ function heroHtml() {
     <div class="hero-media" id="heroMedia">${heroList.map((it, i) => `<div class="hero-slide ${i === 0 ? 'on' : ''}" data-i="${i}">${it.meta?.backdrop ? `<img src="${img(it.meta.backdrop)}" alt="" ${i > 2 ? 'loading="lazy"' : ''}>` : `<div class="thumb-fallback" style="--h:${hueOf(it.title)};position:absolute;inset:0"></div>`}</div>`).join('')}</div>
     <div class="lb top"></div><div class="lb bot"></div>
     <div class="hero-content" id="heroContent">${heroTextHtml(heroList[0])}</div>
-    <div class="shelf-wrap"><div class="shelf" id="shelf" style="--hero-ms:${HERO_MS}ms" role="listbox" aria-label="Featured titles">${heroList.map((it, i) => `
+    <div class="shelf-wrap"><div class="shelf" id="shelf" style="--hero-ms:${heroMs()}ms" role="listbox" aria-label="Featured titles">${heroList.map((it, i) => `
       <button class="tile ${i === 0 ? 'on' : ''}" data-tile="${i}" role="option" aria-selected="${i === 0}" aria-label="${esc(it.meta?.title || it.title)}">
         <div class="poster">${posterInner(it)}</div><span class="timer"><i></i></span>
       </button>`).join('')}</div></div>
@@ -251,12 +252,12 @@ function setHero(i, { manual = false } = {}) {
   const c = $('#heroContent'); if (c) c.innerHTML = heroTextHtml(heroList[heroIdx]);
   setAmbient(heroList[heroIdx]);
   clearTimeout(heroTimer);
-  if (!heroManual) heroTimer = setTimeout(() => setHero(heroIdx + 1), HERO_MS);
+  if (!heroManual && heroAuto()) heroTimer = setTimeout(() => setHero(heroIdx + 1), heroMs());
 }
 function startHero() {
   if (!heroList.length) return;
   setAmbient(heroList[0]);
-  if (heroList.length > 1) heroTimer = setTimeout(() => setHero(1), HERO_MS);
+  if (heroList.length > 1 && heroAuto()) heroTimer = setTimeout(() => setHero(1), heroMs());
   const shelf = $('#shelf'); if (!shelf) return;
   // Hover a tile to preview it, click to open it (PS5 / Apple TV top shelf)
   shelf.addEventListener('pointerover', e => {
@@ -495,7 +496,7 @@ function onScroll() {
   }
 }
 addEventListener('scroll', () => { if (!scrollRaf) scrollRaf = requestAnimationFrame(onScroll); }, { passive: true });
-document.addEventListener('visibilitychange', () => { if (document.hidden) stopHero(); else if (S.view === 'home' && heroList.length > 1 && !heroManual) { clearTimeout(heroTimer); heroTimer = setTimeout(() => setHero(heroIdx + 1), HERO_MS); } });
+document.addEventListener('visibilitychange', () => { if (document.hidden) stopHero(); else if (S.view === 'home' && heroList.length > 1 && !heroManual && heroAuto()) { clearTimeout(heroTimer); heroTimer = setTimeout(() => setHero(heroIdx + 1), heroMs()); } });
 
 /* ================= Detail page ================= */
 function playLabel(it) {
@@ -699,63 +700,107 @@ async function addFolder() {
   if (!$('#modalLayer').hidden) openSettings();
 }
 
-function openSettings() {
+function openSettings(tab = 'general') {
   const s = S.settings;
   const pl = S.players;
   const has = id => pl.some(p => p.id === id);
+  const sel = (v, cur) => v === cur ? 'selected' : '';
+  const tog = (id, on, label, hint = '') => `<label class="toggle"><span><b>${label}</b>${hint ? `<small>${hint}</small>` : ''}</span><input type="checkbox" id="${id}" ${on ? 'checked' : ''}><i aria-hidden="true"></i></label>`;
+  let subSize = 30; try { subSize = +(localStorage.getItem('cv-subsize') ?? 30); } catch { /* ignore */ }
+  const TABS = [['general', 'General'], ['library', 'Library'], ['playback', 'Playback'], ['subtitles', 'Subtitles'], ['advanced', 'Advanced']];
   const m = openModal(`
     <div class="modal-head"><h2>Settings</h2><button class="icon-btn" data-close aria-label="Close settings">${icon('x')}</button></div>
+    <nav class="set-tabs" role="tablist">${TABS.map(([k, l]) => `<button class="chip" role="tab" data-tab="${k}" aria-pressed="${k === tab}">${l}</button>`).join('')}</nav>
     <div class="modal-body">
-      <section class="group"><h3>Library folders</h3><p class="hint">Showtrove watches these folders. New movies show up on their own.</p>
-        <div class="folder-list">${S.folders.map(f => `<div class="folder">${icon('folder')}<code title="${esc(f)}">${esc(f)}</code><button class="btn quiet sm danger" data-rm="${esc(f)}">Remove</button></div>`).join('') || '<p class="hint">No folders yet.</p>'}</div>
-        <div><button class="btn ghost sm" data-act="add-folder">${icon('folder')}Add a folder</button></div>
-      </section>
 
-      <section class="group"><h3>Posters, details and ratings</h3><p class="hint">${S.builtIn?.length ? 'Showtrove comes with its own keys, so you can leave these empty. Paste your own key to use it instead.' : "Free keys. They're saved only on this PC."}</p>
-        <label class="field"><span>TMDB API key</span><input class="input" id="sTmdb" value="${esc(s.tmdbKey)}" spellcheck="false" autocomplete="off" placeholder="e.g. 3f2a… (API key or read access token)">
-          <small>Posters, cast, plot, episodes. Get one at <a data-link="https://www.themoviedb.org/settings/api">themoviedb.org → Settings → API</a></small></label>
-        <label class="field"><span>OMDb API key</span><input class="input" id="sOmdb" value="${esc(s.omdbKey)}" spellcheck="false" autocomplete="off" placeholder="e.g. a1b2c3d4">
-          <small>Adds IMDb and Rotten Tomatoes scores. Get one at <a data-link="https://www.omdbapi.com/apikey.aspx">omdbapi.com/apikey.aspx</a> (free: 1,000 a day)</small></label>
-        <label class="field"><span>Fanart.tv API key <em style="font-style:normal;color:var(--text-3)">· optional</em></span><input class="input" id="sFanart" value="${esc(s.fanartKey)}" spellcheck="false" autocomplete="off">
-          <small>More and better title logos for the big home screen. Get one at <a data-link="https://fanart.tv/get-an-api-key/">fanart.tv/get-an-api-key</a></small></label>
-      </section>
+      <div class="set-panel" data-panel="general">
+        <section class="group"><h3>Home screen</h3>
+          <label class="field"><span>Open Showtrove on</span><select class="input" id="sStart">
+            <option value="home" ${sel('home', s.startView)}>Home</option><option value="movies" ${sel('movies', s.startView)}>Movies</option><option value="tv" ${sel('tv', s.startView)}>TV shows</option></select></label>
+          ${tog('sHeroAuto', s.heroAutoplay, 'Slideshow on the big banner', 'Moves to the next featured title on its own')}
+          <label class="field"><span>Slideshow speed</span><select class="input" id="sHeroSpeed">
+            <option value="6" ${sel(6, +s.heroSpeed)}>Fast (6 seconds)</option><option value="9" ${sel(9, +s.heroSpeed)}>Normal (9 seconds)</option><option value="14" ${sel(14, +s.heroSpeed)}>Slow (14 seconds)</option></select></label>
+        </section>
+        <section class="group"><h3>Look and feel</h3>
+          ${tog('sReduce', s.reduceMotion, 'Reduce motion', 'Turns off parallax, zooms and slide animations')}
+          <label class="field"><span>Language for titles and plots</span><select class="input" id="sMetaLang">
+            ${[['en-US', 'English'], ['si-LK', 'Sinhala'], ['ta-IN', 'Tamil'], ['hi-IN', 'Hindi'], ['ja-JP', 'Japanese'], ['ko-KR', 'Korean'], ['zh-CN', 'Chinese'], ['fr-FR', 'French'], ['es-ES', 'Spanish'], ['de-DE', 'German']]
+              .map(([v, l]) => `<option value="${v}" ${sel(v, s.metadataLanguage)}>${l}</option>`).join('')}</select>
+            <small>Falls back to English when a translation isn't available. Changing it re-downloads details.</small></label>
+        </section>
+        <section class="group"><h3>Updates</h3><p class="hint">Showtrove updates itself and asks before restarting. <span id="sVer"></span></p>
+          <div><button class="btn ghost sm" id="sCheckUpd">${icon('refresh')}Check for updates</button></div>
+        </section>
+      </div>
 
-      <section class="group"><h3>Subtitles</h3><p class="hint">When a video has no subtitle file, Showtrove downloads one and saves it next to the video, so KMPlayer and VLC load it too.</p>
-        <label class="check" style="padding:0"><input type="checkbox" id="sAutoSub" ${s.autoSubtitles ? 'checked' : ''}>Find subtitles automatically before playing</label>
-        <label class="field"><span>OpenSubtitles API key</span><input class="input" id="sOsKey" value="${esc(s.opensubtitlesKey)}" spellcheck="false" autocomplete="off">
-          <small>Create a free consumer at <a data-link="https://www.opensubtitles.com/en/consumers">opensubtitles.com/en/consumers</a>. Without an account you get 5 downloads a day.</small></label>
-        <div class="two">
-          <label class="field"><span>OpenSubtitles username</span><input class="input" id="sOsUser" value="${esc(s.opensubtitlesUser)}" autocomplete="off"><small>Optional, raises the daily limit</small></label>
-          <label class="field"><span>OpenSubtitles password</span><input class="input" id="sOsPass" type="password" value="${esc(s.opensubtitlesPass)}" autocomplete="off"></label>
-        </div>
-        <label class="field"><span>SubDL API key <em style="font-style:normal;color:var(--text-3)">· backup source</em></span><input class="input" id="sSubdl" value="${esc(s.subdlKey)}" spellcheck="false" autocomplete="off">
-          <small>Used when OpenSubtitles has nothing or hits its daily limit. Get one at <a data-link="https://subdl.com">subdl.com</a> → profile → API key (free)</small></label>
-        <label class="field"><span>Subtitle languages, in order</span><input class="input" id="sLangs" value="${esc(s.subtitleLanguages)}" spellcheck="false">
-          <small>Two-letter codes separated by commas, e.g. <b>en, si</b> for English then Sinhala</small></label>
-      </section>
+      <div class="set-panel" data-panel="library">
+        ${libraryReportHtml()}
+        <section class="group"><h3>Library folders</h3><p class="hint">Showtrove watches these folders and their subfolders. New movies show up on their own.</p>
+          <div class="folder-list">${S.folders.map(f => { const r = S.scanReport?.folders?.find(x => x.root === f); return `<div class="folder">${icon('folder')}<div class="f-info"><code title="${esc(f)}">${esc(f)}</code><small>${r ? (r.online ? `${r.movies} movies · ${r.shows} shows (${r.episodes} episodes)` : '<span class="warn">Not connected right now. Its titles are kept until you plug it back in</span>') : 'Not scanned yet'}</small></div><button class="btn quiet sm danger" data-rm="${esc(f)}">Remove</button></div>`; }).join('') || '<p class="hint">No folders yet.</p>'}</div>
+          <div><button class="btn ghost sm" data-act="add-folder">${icon('folder')}Add a folder</button></div>
+        </section>
+        <section class="group"><h3>Tidy up</h3>
+          <div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn ghost sm" id="sRescan">${icon('folder')}Rescan folders now</button><button class="btn ghost sm" id="sRefreshAll">${icon('refresh')}Re-download all posters and details</button></div>
+        </section>
+      </div>
 
-      <section class="group"><h3>Playback</h3>
-        <label class="field"><span>When I press play</span><select class="input" id="sPlayer">
-          <option value="ask" ${s.defaultPlayer === 'ask' ? 'selected' : ''}>Ask me which player</option>
-          ${pl.map(p => `<option value="${p.id}" ${s.defaultPlayer === p.id ? 'selected' : ''}>Always use ${esc(p.name)}</option>`).join('')}
-        </select></label>
-        <label class="field"><span>KMPlayer location ${has('kmplayer') ? '<span style="color:var(--ok)">· found</span>' : ''}</span>
-          <div class="input-row"><input class="input" id="sKmp" value="${esc(s.kmplayerPath)}" placeholder="${has('kmplayer') ? 'Found automatically' : 'C:\\Program Files\\KMPlayer 64X\\KMPlayer64.exe'}" spellcheck="false"><button class="btn ghost sm" data-browse="sKmp">Browse</button></div></label>
-        <label class="field"><span>VLC location ${has('vlc') ? '<span style="color:var(--ok)">· found</span>' : ''}</span>
-          <div class="input-row"><input class="input" id="sVlc" value="${esc(s.vlcPath)}" placeholder="${has('vlc') ? 'Found automatically' : 'C:\\Program Files\\VideoLAN\\VLC\\vlc.exe'}" spellcheck="false"><button class="btn ghost sm" data-browse="sVlc">Browse</button></div></label>
-        <label class="field"><span>Another player (optional)</span>
-          <div class="input-row"><input class="input" id="sCustom" value="${esc(s.customPlayerPath)}" placeholder="Any .exe, e.g. PotPlayer or MPC-BE" spellcheck="false"><button class="btn ghost sm" data-browse="sCustom">Browse</button></div></label>
-      </section>
+      <div class="set-panel" data-panel="playback">
+        <section class="group"><h3>Playing</h3>
+          <label class="field"><span>When I press play</span><select class="input" id="sPlayer">
+            <option value="ask" ${sel('ask', s.defaultPlayer)}>Ask me which player each time</option>
+            ${pl.map(p => `<option value="${p.id}" ${sel(p.id, s.defaultPlayer)}>Always use ${esc(p.name)}</option>`).join('')}
+          </select></label>
+          ${tog('sAutoNext', s.autoNext, 'Play the next episode automatically', 'Starts after an 8-second countdown in the built-in player')}
+        </section>
+        <details class="more"><summary>Player locations</summary>
+          <div class="group" style="margin-top:14px">
+          <label class="field"><span>KMPlayer ${has('kmplayer') ? '<span style="color:var(--ok)">· found</span>' : ''}</span>
+            <div class="input-row"><input class="input" id="sKmp" value="${esc(s.kmplayerPath)}" placeholder="${has('kmplayer') ? 'Found automatically' : 'C:\\Program Files\\KMPlayer 64X\\KMPlayer64.exe'}" spellcheck="false"><button class="btn ghost sm" data-browse="sKmp">Browse</button></div></label>
+          <label class="field"><span>VLC ${has('vlc') ? '<span style="color:var(--ok)">· found</span>' : ''}</span>
+            <div class="input-row"><input class="input" id="sVlc" value="${esc(s.vlcPath)}" placeholder="${has('vlc') ? 'Found automatically' : 'C:\\Program Files\\VideoLAN\\VLC\\vlc.exe'}" spellcheck="false"><button class="btn ghost sm" data-browse="sVlc">Browse</button></div></label>
+          <label class="field"><span>Another player</span>
+            <div class="input-row"><input class="input" id="sCustom" value="${esc(s.customPlayerPath)}" placeholder="Any .exe, e.g. PotPlayer or MPC-BE" spellcheck="false"><button class="btn ghost sm" data-browse="sCustom">Browse</button></div></label>
+          </div>
+        </details>
+      </div>
 
-      <section class="group"><h3>Maintenance</h3>
-        <div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn ghost sm" id="sRefreshAll">${icon('refresh')}Re-download all details</button><button class="btn ghost sm" id="sRescan">${icon('folder')}Rescan folders now</button></div>
-      </section>
+      <div class="set-panel" data-panel="subtitles">
+        <section class="group"><h3>Subtitles</h3><p class="hint">When a video has none, Showtrove downloads one and saves it next to the video, so KMPlayer and VLC use it too.</p>
+          ${tog('sAutoSub', s.autoSubtitles, 'Find subtitles automatically', 'Before a video starts, if it has no subtitle file')}
+          <label class="field"><span>Languages, in order of preference</span><input class="input" id="sLangs" value="${esc(s.subtitleLanguages)}" spellcheck="false">
+            <small>Two-letter codes, e.g. <b>en, si</b> for English then Sinhala. Others: ta Tamil, hi Hindi, ja Japanese, ko Korean</small></label>
+          <label class="field"><span>Text size in the built-in player</span><select class="input" id="sSubSize">
+            ${[[24, 'Small'], [30, 'Medium'], [38, 'Large'], [46, 'Extra large']].map(([v, l]) => `<option value="${v}" ${Math.abs(v - subSize) < 4 ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+        </section>
+        <section class="group"><h3>OpenSubtitles account <em class="opt">· optional</em></h3><p class="hint">Free accounts get more subtitle downloads per day. Saved only on this PC.</p>
+          <div class="two">
+            <label class="field"><span>Username</span><input class="input" id="sOsUser" value="${esc(s.opensubtitlesUser)}" autocomplete="off"></label>
+            <label class="field"><span>Password</span><input class="input" id="sOsPass" type="password" value="${esc(s.opensubtitlesPass)}" autocomplete="off"></label>
+          </div>
+          <small class="hint-s">No account? <a data-link="https://www.opensubtitles.com/en/users/sign_up">Sign up free</a></small>
+        </section>
+      </div>
 
-      <section class="group"><h3>Updates</h3><p class="hint">Showtrove checks for new versions on its own and asks before restarting. <span id="sVer"></span></p>
-        <div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn ghost sm" id="sCheckUpd">${icon('refresh')}Check for updates</button></div>
-      </section>
+      <div class="set-panel" data-panel="advanced">
+        <section class="group"><h3>Your own API keys <em class="opt">· optional</em></h3>
+          <p class="hint">${S.builtIn?.length ? 'Showtrove already includes these, so you can leave them empty. Paste your own key only if you want to use it instead.' : 'Free keys for posters, ratings and subtitles. Saved only on this PC.'}</p>
+          <label class="field"><span>TMDB</span><input class="input" id="sTmdb" value="${esc(s.tmdbKey)}" spellcheck="false" autocomplete="off" placeholder="API key or read access token"><small>Posters, cast, plot · <a data-link="https://www.themoviedb.org/settings/api">get a key</a></small></label>
+          <label class="field"><span>OMDb</span><input class="input" id="sOmdb" value="${esc(s.omdbKey)}" spellcheck="false" autocomplete="off"><small>IMDb and Rotten Tomatoes scores · <a data-link="https://www.omdbapi.com/apikey.aspx">get a key</a></small></label>
+          <label class="field"><span>Fanart.tv</span><input class="input" id="sFanart" value="${esc(s.fanartKey)}" spellcheck="false" autocomplete="off"><small>Title logos · <a data-link="https://fanart.tv/get-an-api-key/">get a key</a></small></label>
+          <label class="field"><span>OpenSubtitles</span><input class="input" id="sOsKey" value="${esc(s.opensubtitlesKey)}" spellcheck="false" autocomplete="off"><small>Subtitles · <a data-link="https://www.opensubtitles.com/en/consumers">get a key</a></small></label>
+          <label class="field"><span>SubDL</span><input class="input" id="sSubdl" value="${esc(s.subdlKey)}" spellcheck="false" autocomplete="off"><small>Backup subtitles · <a data-link="https://subdl.com">get a key</a></small></label>
+        </section>
+      </div>
     </div>
     <div class="modal-foot"><button class="btn quiet" data-close>Cancel</button><button class="btn primary" id="sSave">${icon('check')}Save settings</button></div>`);
+
+  const showTab = k => {
+    $$('[data-tab]', m).forEach(b => b.setAttribute('aria-pressed', String(b.dataset.tab === k)));
+    $$('[data-panel]', m).forEach(p => { p.hidden = p.dataset.panel !== k; });
+    $('.modal-body', m).scrollTop = 0;
+  };
+  $$('[data-tab]', m).forEach(b => b.onclick = () => showTab(b.dataset.tab));
+  showTab(tab);
 
   $$('[data-close]', m).forEach(b => b.onclick = closeModal);
   // Keys that ship with the app: show that they're covered, let people paste their own to override
@@ -766,9 +811,11 @@ function openSettings() {
   $$('[data-link]', m).forEach(a => a.onclick = () => api.openExternal(a.dataset.link));
   $$('[data-rm]', m).forEach(b => b.onclick = async () => {
     if (b.dataset.confirm !== '1') { b.dataset.confirm = '1'; b.textContent = 'Click again to remove'; return; }
-    applyState(await api.removeFolder(b.dataset.rm)); openSettings(); toast('Folder removed. Your files are untouched.');
+    applyState(await api.removeFolder(b.dataset.rm)); openSettings('library'); toast('Folder removed. Your files are untouched.');
   });
   $$('[data-browse]', m).forEach(b => b.onclick = async () => { const p = await api.browseExe(); if (p) $('#' + b.dataset.browse).value = p; });
+  $$('[data-fix]', m).forEach(b => b.onclick = () => { const it = byId(b.dataset.fix); closeModal(); if (it) openFixMatch(it); });
+  $$('.skip-row [data-reveal]', m).forEach(b => b.onclick = e => { e.preventDefault(); e.stopPropagation(); api.showInFolder(b.dataset.reveal); });
   $('#sRefreshAll').onclick = () => { api.refreshAll(); toast('Re-downloading details in the background'); };
   $('#sRescan').onclick = () => api.rescan();
   api.appVersion().then(v => { const e = $('#sVer'); if (e) e.textContent = `You have version ${v}.`; });
@@ -780,8 +827,11 @@ function openSettings() {
   };
   $('#sSave').onclick = async () => {
     const tm = $('#sTmdb').value.trim();
-    if (tm && !/^[A-Za-z0-9._-]{20,}$/.test(tm)) { const f = $('#sTmdb'); f.classList.remove('shake'); void f.offsetWidth; f.classList.add('shake'); toast('That TMDB key looks incomplete. Paste the whole key.'); return; }
+    if (tm && !/^[A-Za-z0-9._-]{20,}$/.test(tm)) { showTab('advanced'); const f = $('#sTmdb'); f.classList.remove('shake'); void f.offsetWidth; f.classList.add('shake'); toast('That TMDB key looks incomplete. Paste the whole key.'); return; }
+    try { localStorage.setItem('cv-subsize', $('#sSubSize').value); } catch { /* ignore */ }
     const st = await api.saveSettings({
+      startView: $('#sStart').value, heroAutoplay: $('#sHeroAuto').checked, heroSpeed: +$('#sHeroSpeed').value,
+      reduceMotion: $('#sReduce').checked, metadataLanguage: $('#sMetaLang').value, autoNext: $('#sAutoNext').checked,
       tmdbKey: tm, omdbKey: $('#sOmdb').value.trim(), fanartKey: $('#sFanart').value.trim(), subdlKey: $('#sSubdl').value.trim(),
       opensubtitlesKey: $('#sOsKey').value.trim(), opensubtitlesUser: $('#sOsUser').value.trim(), opensubtitlesPass: $('#sOsPass').value,
       subtitleLanguages: $('#sLangs').value.toLowerCase().replace(/[^a-z,-]/g, '') || 'en', autoSubtitles: $('#sAutoSub').checked,
@@ -789,6 +839,32 @@ function openSettings() {
     });
     applyState(st); closeModal(); toast('Settings saved', 'ok');
   };
+}
+
+/* Settings → Library: counts, what's not showing and why */
+function libraryReportHtml() {
+  const movies = S.items.filter(i => i.type === 'movie'), shows = S.items.filter(i => i.type === 'tv');
+  const eps = shows.reduce((n, i) => n + Object.keys(i.episodes || {}).length, 0);
+  const rep = S.scanReport;
+  const unmatched = S.items.filter(i => i.metaStatus === 'notfound' || i.metaStatus === 'error');
+  const groups = {};
+  for (const x of rep?.skipped || []) (groups[x.reason] ||= []).push(x.path);
+  const skippedN = rep?.skippedCount || 0;
+  const when = rep?.at ? new Date(rep.at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : null;
+  return `<section class="group"><h3>What's in your library</h3>${when ? `<p class="hint">Last checked ${esc(when)}</p>` : ''}
+    <div class="lib-stats">
+      <div><b>${movies.length}</b><small>Movies</small></div>
+      <div><b>${shows.length}</b><small>TV shows</small></div>
+      <div><b>${eps}</b><small>Episodes</small></div>
+      <div class="${skippedN + unmatched.length ? 'warn' : ''}"><b>${skippedN + unmatched.length}</b><small>Not showing properly</small></div>
+    </div>
+    ${unmatched.length ? `<details class="more"><summary>Couldn't identify (${unmatched.length}) <span class="hint-s">· shown with the file name, no poster</span></summary>
+      <div class="skip-list">${unmatched.map(i => `<div class="skip-row"><div><b>${esc(i.title)}${i.year ? ` (${i.year})` : ''}</b><code>${esc((i.files?.[0] || i.root || '').split(/[\\/]/).slice(-2).join('/'))}</code></div><button class="btn ghost sm" data-fix="${esc(i.id)}">${icon('wand')}Fix match</button></div>`).join('')}</div></details>` : ''}
+    ${skippedN ? `<details class="more"><summary>Not showing (${skippedN}) <span class="hint-s">· files and folders Showtrove skipped</span></summary>
+      <div class="skip-list">${Object.entries(groups).map(([reason, list]) => `<div class="skip-group"><b>${esc(reason)} · ${list.length}</b>${list.slice(0, 40).map(pth => `<div class="skip-row"><code title="${esc(pth)}">${esc(pth)}</code><button class="btn quiet sm" data-reveal="${esc(pth)}">${icon('folder', 'sm')}Show</button></div>`).join('')}${list.length > 40 ? `<small class="hint-s">…and ${list.length - 40} more</small>` : ''}</div>`).join('')}
+      ${skippedN > (rep?.skipped?.length || 0) ? `<small class="hint-s">Showing the first ${rep.skipped.length}.</small>` : ''}</div></details>` : ''}
+    ${!skippedN && !unmatched.length && rep ? '<p class="hint-s" style="color:var(--ok)">Everything in your folders is showing ✓</p>' : ''}
+  </section>`;
 }
 
 function openFixMatch(it) {
@@ -827,7 +903,9 @@ function openFixMatch(it) {
 /* ================= Live updates ================= */
 function applyState(st) {
   window.__players = st.players;
-  Object.assign(S, { items: st.items, progress: st.progress, settings: st.settings, builtIn: st.builtIn || [], players: st.players, folders: st.folders, online: st.online });
+  document.body.classList.toggle('reduce-motion', !!st.settings?.reduceMotion);
+  document.body.classList.toggle('no-hero-auto', st.settings?.heroAutoplay === false);
+  Object.assign(S, { items: st.items, progress: st.progress, settings: st.settings, builtIn: st.builtIn || [], scanReport: st.scanReport || null, players: st.players, folders: st.folders, online: st.online });
   render();
 }
 function refreshCards(id) {
@@ -869,6 +947,8 @@ api.onScanStatus(s => {
 $('#refreshBtn').addEventListener('click', () => { S.manualScan = true; setTimeout(() => S.manualScan = false, 8000); });
 api.onToast(msg => toast(msg, /✓/.test(msg) ? 'ok' : ''));
 api.onUpdate(u => {
+  const pill = $('#updPill');
+  if (pill) { pill.hidden = false; pill.dataset.state = u.state; pill.querySelector('span').textContent = u.state === 'ready' ? `Update ready · ${u.version}` : `Downloading ${u.version}…`; }
   if (u.state === 'downloading') toast(`Downloading Showtrove ${u.version} in the background…`);
   if (u.state === 'ready' && !document.querySelector('.update-bar')) {
     const bar = html(`<div class="update-bar" role="status"><span>Showtrove ${esc(u.version)} is ready</span><button class="btn small primary" type="button">Restart to update</button><button class="btn small ghost" type="button" aria-label="Later">Later</button></div>`);
@@ -884,10 +964,14 @@ api.onFullscreen(fs => document.body.classList.toggle('fullscreen', fs));
 window.addEventListener('cv-progress', e => { S.progress[e.detail.file] = e.detail.p; });
 window.addEventListener('cv-player-closed', () => { if (S.detailId) openDetail(S.detailId, { keepSeason: +($('#detailLayer [data-season][aria-pressed="true"]')?.dataset.season) || undefined }); render(); });
 
+$('#updPill')?.addEventListener('click', () => { if ($('#updPill').dataset.state === 'ready') api.installUpdate(); else toast('Still downloading the update. It installs when it\'s ready.'); });
+
 /* ================= Boot ================= */
 (async () => {
   enableDragScroll(); enableTilt();
-  applyState(await api.getState());
+  const st0 = await api.getState();
+  if (['movies', 'tv'].includes(st0.settings?.startView)) S.view = S.lastView = st0.settings.startView;
+  applyState(st0);
   requestAnimationFrame(updateSwitch);
   document.fonts.ready.then(updateSwitch);
 })();

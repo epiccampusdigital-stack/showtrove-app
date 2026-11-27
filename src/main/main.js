@@ -68,6 +68,7 @@ function stateForUi() {
     progress: store.data.progress,
     settings: store.userSettings,
     builtIn: Object.keys(require('./builtin-keys')),
+    scanReport: store.data.scanReport || null,
     players: detectPlayers(store.settings).map(({ id, name }) => ({ id, name })),
     online: net.isOnline()
   };
@@ -198,6 +199,11 @@ ipcMain.handle('save-settings', (_e, patch) => {
   // New OMDb key: go back and add IMDb / Rotten Tomatoes scores to everything already in the library
   if (patch.omdbKey && patch.omdbKey !== before.omdbKey) {
     for (const it of Object.values(store.data.items)) if (it.metaStatus === 'ok' && !it.meta?.imdbRating) it.metaStatus = 'pending';
+    fetchMeta();
+  }
+  // Different language for titles/plots: re-download details
+  if (patch.metadataLanguage && patch.metadataLanguage !== before.metadataLanguage) {
+    for (const it of Object.values(store.data.items)) if (it.metaStatus === 'ok') it.metaStatus = 'pending';
     fetchMeta();
   }
   // New fanart.tv key: fetch title logos for everything missing one

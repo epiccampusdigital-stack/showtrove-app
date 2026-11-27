@@ -41,6 +41,7 @@ class Store {
     return {
       tmdbKey: '', omdbKey: '', fanartKey: '', subdlKey: '', opensubtitlesKey: '', opensubtitlesUser: '', opensubtitlesPass: '',
       subtitleLanguages: 'en', autoSubtitles: true,
+      startView: 'home', heroAutoplay: true, heroSpeed: 9, reduceMotion: false, autoNext: true,
       defaultPlayer: 'ask', // ask | builtin | kmplayer | vlc | potplayer | mpc | system | custom
       customPlayerPath: '', kmplayerPath: '', vlcPath: '',
       metadataLanguage: 'en-US',

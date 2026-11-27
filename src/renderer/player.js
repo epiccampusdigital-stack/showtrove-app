@@ -295,8 +295,8 @@ const Player = (() => {
     const n = data.next; if (!n) return;
     const m = ctx.item.meta?.seasons?.[n.season]?.episodes?.[n.episode];
     card(`<b>Up next · S${n.season} E${n.episode}</b>${m?.title ? `<p>${esc(m.title)}</p>` : ''}
-      <div class="row-btns"><button class="btn primary sm ${auto ? 'count' : ''}" data-next>${icon('play')}Play next episode</button><button class="btn quiet sm" data-x>Not now</button></div>`);
-    if (auto) { clearTimeout(nextT); nextT = setTimeout(playNext, 8000); }
+      <div class="row-btns"><button class="btn primary sm ${auto && S.settings?.autoNext !== false ? 'count' : ''}" data-next>${icon('play')}Play next episode</button><button class="btn quiet sm" data-x>Not now</button></div>`);
+    if (auto && S.settings?.autoNext !== false) { clearTimeout(nextT); nextT = setTimeout(playNext, 8000); }
   }
   function ended() {
     save();

@@ -140,6 +140,16 @@ function pickResult(results, title, year, dateField) {
   return scored.sort((a, b) => b.s - a.s)[0].r;
 }
 
+// Non-English language picked but TMDB has no translated plot: use the English one
+async function englishFallback(d, p, settings) {
+  const lang = settings.metadataLanguage || 'en-US';
+  if (lang.startsWith('en') || d.overview) return;
+  try {
+    const e = await tmdb(p, {}, { ...settings, metadataLanguage: 'en-US' });
+    d.overview = e.overview; d.tagline = d.tagline || e.tagline;
+  } catch (err) { if (err instanceof OfflineError) throw err; }
+}
+
 // ---------- Movies ----------
 async function fetchMovie(store, item, settings) {
   let id = item.override?.tmdbId;
@@ -151,6 +161,7 @@ async function fetchMovie(store, item, settings) {
     id = hit.id;
   }
   const d = await tmdb(`/movie/${id}`, { append_to_response: 'credits,videos,release_dates,images,recommendations,similar', include_image_language: 'en,null' }, settings);
+  await englishFallback(d, `/movie/${id}`, settings);
   const usCert = (d.release_dates?.results || []).find(r => r.iso_3166_1 === 'US')?.release_dates?.find(x => x.certification)?.certification;
   const [poster, backdrop, cast, extra, logo] = await Promise.all([
     cacheImage(store, d.poster_path, 'w500'),
@@ -187,6 +198,7 @@ async function fetchTv(store, item, settings) {
     id = hit.id;
   }
   const d = await tmdb(`/tv/${id}`, { append_to_response: 'credits,aggregate_credits,external_ids,videos,content_ratings,images,recommendations,similar', include_image_language: 'en,null' }, settings);
+  await englishFallback(d, `/tv/${id}`, settings);
   const imdbId = d.external_ids?.imdb_id || null;
   const cert = (d.content_ratings?.results || []).find(r => r.iso_3166_1 === 'US')?.rating;
   const [poster, backdrop, cast, extra, logo] = await Promise.all([
