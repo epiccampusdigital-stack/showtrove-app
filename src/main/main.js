@@ -8,6 +8,7 @@ const { scanLibrary, watchFolders } = require('./scanner');
 const { runQueue, searchTmdb } = require('./metadata');
 const { detectPlayers, launch } = require('./players');
 const subs = require('./subtitles');
+const tx = require('./transcode');
 
 // Lets the built-in player switch audio tracks (e.g. Japanese / English dub)
 app.commandLine.appendSwitch('enable-experimental-web-platform-features');
@@ -38,6 +39,13 @@ function registerProtocol() {
       }
       if (kind === 'sub') {
         return new Response(await subs.loadAsVtt(dec(arg)), { headers: { 'Content-Type': 'text/vtt; charset=utf-8' } });
+      }
+      if (kind === 'tx') {
+        // converted stream for files the built-in player can't decode
+        const file = dec(arg);
+        const s = tx.stream(file, { ss: +u.searchParams.get('ss') || 0, audio: +u.searchParams.get('a') || 0, mode: u.searchParams.get('m') === 'full' ? 'full' : 'audio' });
+        req.signal?.addEventListener?.('abort', s.kill);
+        return new Response(s.body, { headers: { 'Content-Type': 'video/mp4', 'Cache-Control': 'no-store' } });
       }
       if (kind === 'media') {
         const file = dec(arg);
@@ -129,7 +137,7 @@ ipcMain.handle('play', async (_e, { id, season, episode, playerId, skipSubs }) =
   const settings = store.settings;
 
   let found = { subs: await subs.findLocalSubs(t.file), downloaded: null };
-  if (settings.autoSubtitles && !skipSubs && !found.subs.length && settings.opensubtitlesKey && net.isOnline()) {
+  if (settings.autoSubtitles && !skipSubs && !found.subs.length && (settings.opensubtitlesKey || settings.subdlKey) && net.isOnline()) {
     send('toast', 'Looking for subtitles…');
     try { found = await subs.ensureSubtitles(t.file, t.ctx, settings); }
     catch (e) { send('toast', e.message); }
@@ -150,6 +158,12 @@ ipcMain.handle('play', async (_e, { id, season, episode, playerId, skipSubs }) =
   await launch(playerId, t.file, { sub: found.subs[0]?.path, start }, settings);
   return { mode: 'external' };
 });
+
+ipcMain.handle('probe', async (_e, file) => {
+  const info = await tx.probe(file);
+  return info ? { ...info, canConvert: tx.available(), txBase: `cv://tx/${enc(file)}` } : { canConvert: false };
+});
+ipcMain.handle('stop-convert', () => tx.stopAll());
 
 ipcMain.handle('find-subtitles', async (_e, { id, season, episode }) => {
   const item = store.data.items[id];

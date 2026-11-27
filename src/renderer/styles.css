@@ -911,3 +911,6 @@ body.no-hero-auto .tile .timer { display: none; }
 .btn.flag-on .ic { color: var(--pc); }
 .card .flag-label { bottom: 18px; }
 .flag-chips { flex: none; overflow: visible; -webkit-mask-image: none; mask-image: none; padding-right: 6px; border-right: 1px solid var(--line); margin-right: 4px; }
+
+.lib-stats .ok b { color: var(--ok); }
+details.more.quiet { opacity: .8; }

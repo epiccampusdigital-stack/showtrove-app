@@ -22,6 +22,12 @@ const SKIP_REASON = name =>
   : /^trailers?$/i.test(name) ? 'Trailers folder'
   : 'Bonus features folder (extras, featurettes, deleted scenes)';
 
+// Release-group promo files (YTS / YIFY / RARBG … logos, ads, "do not mirror" clips): ignored completely
+const PROMO = /^(www\.)?(yts|yify|rarbg|etrg|ettv|eztv|1337x|torrentgalaxy|tgx|psa|pahe|galaxyrg|mkvcage|ganool|ytsmx)([\s._-]*(mx|am|lt|ag|to|com|org|re|nz|in|li|me|pm))*([\s._-]*(do[\s._-]*not[\s._-]*mirror|logo|ad|promo|info|trailer))?$/i;
+const isPromo = name => PROMO.test(path.parse(name).name) || /(^|[\s._-])(do[\s._-]?not[\s._-]?mirror)([\s._-]|$)/i.test(name);
+// Skipped on purpose (bonus material) vs. real problems you may want to fix
+const INTENDED = new Set(['Sample clip', 'Sample clips folder', 'Trailers folder', 'Bonus features folder (extras, featurettes, deleted scenes)']);
+
 // Fast walk: subfolders are read in parallel and no per-file disk lookups are needed.
 async function walk(dir, out = [], skipped = []) {
   let entries;
@@ -34,6 +40,7 @@ async function walk(dir, out = [], skipped = []) {
       if (!SKIP_DIRS.test(e.name)) subdirs.push(full);
       else { const r = SKIP_REASON(e.name); if (r) skipped.push({ path: full, reason: r }); }
     } else if (e.isFile() || e.isSymbolicLink()) {
+      if (isPromo(e.name)) continue;
       if (isVideo(e.name)) {
         if (/(^|[\s._-])sample([\s._-]|$)/i.test(path.parse(e.name).name)) { skipped.push({ path: full, reason: 'Sample clip' }); continue; }
         out.push({ path: full });
@@ -138,8 +145,9 @@ async function scanLibrary(store) {
         shows: mine.filter(i => i.type === 'tv').length,
         episodes: mine.filter(i => i.type === 'tv').reduce((n, i) => n + Object.keys(i.episodes).length, 0) };
     }),
-    skippedCount: skipped.length,
-    skipped: skipped.slice(0, 400)
+    skippedCount: skipped.filter(x => !INTENDED.has(x.reason)).length,
+    intendedCount: skipped.filter(x => INTENDED.has(x.reason)).length,
+    skipped: [...skipped.filter(x => !INTENDED.has(x.reason)), ...skipped.filter(x => INTENDED.has(x.reason))].slice(0, 400).map(x => ({ ...x, intended: INTENDED.has(x.reason) }))
   };
   store.save();
   return { added, removed };

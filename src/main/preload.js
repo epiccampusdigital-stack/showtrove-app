@@ -30,6 +30,8 @@ contextBridge.exposeInMainWorld('api', {
   onOnline: on('online'),
   onFullscreen: on('fullscreen'),
   onUpdate: on('update'),
+  probe: (file) => ipcRenderer.invoke('probe', file),
+  stopConvert: () => ipcRenderer.invoke('stop-convert'),
   setFlag: (id, level) => ipcRenderer.invoke('set-flag', { id, level }),
   setHidden: (id, hidden) => ipcRenderer.invoke('set-hidden', { id, hidden }),
   pinStatus: () => ipcRenderer.invoke('pin-status'),

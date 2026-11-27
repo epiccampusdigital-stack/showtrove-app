@@ -150,15 +150,52 @@ async function englishFallback(d, p, settings) {
   } catch (err) { if (err instanceof OfflineError) throw err; }
 }
 
+// Different ways to write a title, tried in order until TMDB finds it
+function titleVariants(title) {
+  const out = [];
+  const add = t => { t = (t || '').replace(/\s+/g, ' ').trim(); if (t.length >= 1 && !out.includes(t)) out.push(t); };
+  add(title);
+  add(title.replace(/\b(extended|unrated|uncut|remastered|theatrical|imax|criterion|director'?s cut|final cut|special edition|anniversary edition|collector'?s edition)\b.*$/i, ''));
+  add(title.replace(/&/g, 'and'));
+  add(title.replace(/\band\b/gi, '&'));
+  add(title.replace(/['’]/g, ''));
+  add(title.replace(/\s*\(.*?\)\s*/g, ' '));
+  if (/ - /.test(title)) { add(title.split(' - ')[0]); add(title.split(' - ').slice(1).join(' ')); }
+  add(title.replace(/^(the|a|an) /i, ''));
+  add(title.replace(/\b(part|pt|chapter|vol(ume)?)\s*(\d+|[ivx]+)\b.*$/i, ''));
+  add(title.replace(/\s\d+$/, ''));               // "Movie 2" -> "Movie" (sequel numbering in odd places)
+  add(title.replace(/([a-z])([A-Z])/g, '$1 $2'));   // "TheDarkKnight"
+  return out.slice(0, 7);
+}
+
+async function findId(kind, item, settings) {
+  const path = kind === 'tv' ? '/search/tv' : '/search/movie';
+  const yearKey = kind === 'tv' ? 'first_air_date_year' : 'year';
+  const dateField = kind === 'tv' ? 'first_air_date' : 'release_date';
+  for (const q of titleVariants(item.title)) {
+    if (item.year) {
+      const r = await tmdb(path, { query: q, [yearKey]: item.year }, settings);
+      const hit = pickResult(r.results, q, item.year, dateField);
+      if (hit) return { id: hit.id, kind };
+    }
+    const r = await tmdb(path, { query: q }, settings);
+    const hit = pickResult(r.results, q, item.year, dateField);
+    if (hit && (!item.year || Math.abs(+(hit[dateField] || '').slice(0, 4) - item.year) <= 2 || r.results.length === 1)) return { id: hit.id, kind };
+  }
+  // Last try: search everything (catches a show filed as a movie and the other way round)
+  const r = await tmdb('/search/multi', { query: titleVariants(item.title)[0] }, settings);
+  const m = (r.results || []).find(x => x.media_type === kind) || (r.results || []).find(x => x.media_type === 'movie' || x.media_type === 'tv');
+  return m ? { id: m.id, kind: m.media_type } : null;
+}
+
 // ---------- Movies ----------
 async function fetchMovie(store, item, settings) {
   let id = item.override?.tmdbId;
   if (!id) {
-    let res = await tmdb('/search/movie', { query: item.title, ...(item.year ? { year: item.year } : {}) }, settings);
-    if (!res.results?.length && item.year) res = await tmdb('/search/movie', { query: item.title }, settings);
-    const hit = pickResult(res.results, item.title, item.year, 'release_date');
-    if (!hit) return null;
-    id = hit.id;
+    const f = await findId('movie', item, settings);
+    if (!f) return null;
+    if (f.kind === 'tv') return null; // a movie file that only matches a show: leave it for Fix match
+    id = f.id;
   }
   const d = await tmdb(`/movie/${id}`, { append_to_response: 'credits,videos,release_dates,images,recommendations,similar', include_image_language: 'en,null' }, settings);
   await englishFallback(d, `/movie/${id}`, settings);
@@ -189,13 +226,9 @@ async function fetchMovie(store, item, settings) {
 async function fetchTv(store, item, settings) {
   let id = item.override?.tmdbId;
   if (!id) {
-    let res = await tmdb('/search/tv', { query: item.title, ...(item.year ? { first_air_date_year: item.year } : {}) }, settings);
-    if (!res.results?.length && item.year) res = await tmdb('/search/tv', { query: item.title }, settings);
-    // "The Office (US)" -> try "The Office"
-    if (!res.results?.length && /\(.*\)/.test(item.title)) res = await tmdb('/search/tv', { query: item.title.replace(/\s*\(.*\)/, '') }, settings);
-    const hit = pickResult(res.results, item.title, item.year, 'first_air_date');
-    if (!hit) return null;
-    id = hit.id;
+    const f = await findId('tv', item, settings);
+    if (!f || f.kind !== 'tv') return null;
+    id = f.id;
   }
   const d = await tmdb(`/tv/${id}`, { append_to_response: 'credits,aggregate_credits,external_ids,videos,content_ratings,images,recommendations,similar', include_image_language: 'en,null' }, settings);
   await englishFallback(d, `/tv/${id}`, settings);
@@ -276,6 +309,10 @@ async function runQueue(store, { onProgress, onItem, onError, retryNotFound = fa
       }
     }
     for (const it of Object.values(store.data.items)) if (it.metaStatus === 'ok' && it.meta && (it.meta.schema || 1) < 2) it.metaStatus = 'pending';
+    if ((store.data.matcher || 0) < 2) {
+      for (const it of Object.values(store.data.items)) if (it.metaStatus === 'notfound' || it.metaStatus === 'error') it.metaStatus = 'pending';
+      store.data.matcher = 2;
+    }
     // Adult files are never sent to TMDB (they'd only match the wrong movie anyway)
     for (const it of Object.values(store.data.items)) if (it.autoAdult && it.hidden !== false && it.metaStatus === 'pending') it.metaStatus = 'skipped';
     const todo = Object.values(store.data.items).filter(i =>

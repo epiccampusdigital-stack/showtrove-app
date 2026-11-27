@@ -997,24 +997,28 @@ function libraryReportHtml() {
   const movies = S.items.filter(i => i.type === 'movie'), shows = S.items.filter(i => i.type === 'tv');
   const eps = shows.reduce((n, i) => n + Object.keys(i.episodes || {}).length, 0);
   const rep = S.scanReport;
-  const unmatched = S.items.filter(i => i.metaStatus === 'notfound' || i.metaStatus === 'error'); // hidden ones stay private
-  const groups = {};
-  for (const x of rep?.skipped || []) (groups[x.reason] ||= []).push(x.path);
-  const skippedN = rep?.skippedCount || 0;
+  const busy = S.items.filter(i => i.metaStatus === 'pending').length;
+  const unmatched = S.items.filter(i => i.metaStatus === 'notfound' || i.metaStatus === 'error');
+  const problems = (rep?.skipped || []).filter(x => !x.intended), intended = (rep?.skipped || []).filter(x => x.intended);
+  const group = list => { const g = {}; for (const x of list) (g[x.reason] ||= []).push(x.path); return g; };
+  const listHtml = g => Object.entries(g).map(([reason, list]) => `<div class="skip-group"><b>${esc(reason)} · ${list.length}</b>${list.slice(0, 40).map(pth => `<div class="skip-row"><code title="${esc(pth)}">${esc(pth)}</code><button class="btn quiet sm" data-reveal="${esc(pth)}">${icon('folder', 'sm')}Show</button></div>`).join('')}${list.length > 40 ? `<small class="hint-s">…and ${list.length - 40} more</small>` : ''}</div>`).join('');
+  const probN = rep?.skippedCount ?? problems.length, intN = rep?.intendedCount ?? intended.length;
   const when = rep?.at ? new Date(rep.at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : null;
-  return `<section class="group"><h3>What's in your library</h3>${when ? `<p class="hint">Last checked ${esc(when)}</p>` : ''}
+  return `<section class="group"><h3>What's in your library</h3>${when ? `<p class="hint">Last checked ${esc(when)}${busy ? ` · still matching ${busy} title${busy > 1 ? 's' : ''}…` : ''}</p>` : ''}
     <div class="lib-stats">
       <div><b>${movies.length}</b><small>Movies</small></div>
       <div><b>${shows.length}</b><small>TV shows</small></div>
       <div><b>${eps}</b><small>Episodes</small></div>
-      <div class="${skippedN + unmatched.length ? 'warn' : ''}"><b>${skippedN + unmatched.length}</b><small>Not showing properly</small></div>
+      <div class="${probN + unmatched.length ? 'warn' : 'ok'}"><b>${probN + unmatched.length}</b><small>${probN + unmatched.length ? 'Need your attention' : 'Problems'}</small></div>
     </div>
-    ${unmatched.length ? `<details class="more"><summary>Couldn't identify (${unmatched.length}) <span class="hint-s">· shown with the file name, no poster</span></summary>
+    ${unmatched.length ? `<details class="more"><summary>Couldn't identify (${unmatched.length}) <span class="hint-s">· showing with the file name, no poster</span></summary>
+      <p class="hint-s" style="margin-top:10px">Usually the file name is too different from the real title. Click Fix match and search the right name once.</p>
       <div class="skip-list">${unmatched.map(i => `<div class="skip-row"><div><b>${esc(i.title)}${i.year ? ` (${i.year})` : ''}</b><code>${esc((i.files?.[0] || i.root || '').split(/[\\/]/).slice(-2).join('/'))}</code></div><button class="btn ghost sm" data-fix="${esc(i.id)}">${icon('wand')}Fix match</button></div>`).join('')}</div></details>` : ''}
-    ${skippedN ? `<details class="more"><summary>Not showing (${skippedN}) <span class="hint-s">· files and folders Showtrove skipped</span></summary>
-      <div class="skip-list">${Object.entries(groups).map(([reason, list]) => `<div class="skip-group"><b>${esc(reason)} · ${list.length}</b>${list.slice(0, 40).map(pth => `<div class="skip-row"><code title="${esc(pth)}">${esc(pth)}</code><button class="btn quiet sm" data-reveal="${esc(pth)}">${icon('folder', 'sm')}Show</button></div>`).join('')}${list.length > 40 ? `<small class="hint-s">…and ${list.length - 40} more</small>` : ''}</div>`).join('')}
-      ${skippedN > (rep?.skipped?.length || 0) ? `<small class="hint-s">Showing the first ${rep.skipped.length}.</small>` : ''}</div></details>` : ''}
-    ${!skippedN && !unmatched.length && rep ? '<p class="hint-s" style="color:var(--ok)">Everything in your folders is showing ✓</p>' : ''}
+    ${probN ? `<details class="more"><summary>Can't be played (${probN}) <span class="hint-s">· unfinished, disc images, archives, locked folders</span></summary>
+      <div class="skip-list">${listHtml(group(problems))}</div></details>` : ''}
+    ${intN ? `<details class="more quiet"><summary>Skipped on purpose (${intN}) <span class="hint-s">· samples, trailers and bonus features</span></summary>
+      <div class="skip-list">${listHtml(group(intended))}</div></details>` : ''}
+    ${!probN && !unmatched.length && rep ? `<p class="hint-s" style="color:var(--ok)">Everything in your folders is showing ✓${busy ? ' (a few titles are still being matched)' : ''}</p>` : ''}
   </section>`;
 }
 

@@ -19,15 +19,21 @@ const JUNK = [
   'aac', 'aac2', 'ac3', 'dts', 'dts-hd', 'ddp5', 'dd5', 'ddp', 'truehd', 'atmos', 'flac', 'mp3', '5.1', '7.1', '2.0',
   'yify', 'yts', 'rarbg', 'eztv', 'ettv', 'psa', 'pahe', 'galaxyrg', 'tigole', 'qxr', 'sparks', 'ganool',
   'extended', 'unrated', 'directors', 'director\'s', 'remastered', 'proper', 'repack', 'limited', 'internal',
-  'imax', 'multi', 'dual', 'dubbed', 'subbed', 'esub', 'esubs', 'hindi', 'tamil', 'telugu', 'sinhala', 'nf', 'amzn', 'dsnp', 'hmax', 'atvp'
+  'imax', 'multi', 'dual', 'dubbed', 'subbed', 'esub', 'esubs', 'hindi', 'tamil', 'telugu', 'sinhala', 'nf', 'amzn', 'dsnp', 'hmax', 'atvp',
+  'malayalam', 'kannada', 'bengali', 'english', 'eng', 'org', 'audio', 'hq', 'hc', 'predvd', 'camrip', 'hdts', 'hdtc', 'webhd',
+  'hdr10plus', 'dovi', 'sdr', 'uncut', 'theatrical', 'criterion', 'hybrid', 'vostfr', 'ita', 'french', 'spanish', 'korean', 'japanese',
+  'mkvcage', 'mkvhub', 'psarips', 'tgx', 'ion10', 'cmrg', 'ntb', 'flux', 'kogi', 'evo', 'fgt', 'etrg', 'axxo', 'ytsmx', '1080', '720'
 ];
 const JUNK_SET = new Set(JUNK);
 
 function isVideo(file) { return VIDEO_EXT.has(path.extname(file).toLowerCase()); }
 function isSubtitle(file) { return SUB_EXT.has(path.extname(file).toLowerCase()); }
 
+// "www.TamilBlasters.xyz - Movie", "[www.site.com] Movie", "Site.com_Movie"
+const SITE_PREFIX = /^\s*(?:\[[^\]]*\]\s*)?(?:www\.)?[a-z0-9-]+\.(?:com|org|net|mx|am|lt|ag|to|xyz|in|me|io|ws|cc|tv|li|se|nz|re|pw|si|ink|mov|ms|is|club|site|live|vip|world)\b\s*[-_\s]+/i;
 function tidy(s) {
   return s
+    .replace(SITE_PREFIX, '')
     .replace(/\[[^\]]*\]/g, ' ')          // [YTS.MX] etc.
     .replace(/[._]+/g, ' ')               // dots/underscores -> spaces
     .replace(/\s+-\s+/g, ' - ')
