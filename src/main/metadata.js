@@ -51,6 +51,49 @@ async function cacheImage(store, tmdbPath, size) {
   } catch { return null; }
 }
 
+// Same as cacheImage but for any https image URL (fanart.tv logos)
+async function cacheUrl(store, url) {
+  if (!url) return null;
+  const name = crypto.createHash('sha1').update(url).digest('hex').slice(0, 20) + (path.extname(new URL(url).pathname) || '.png');
+  const file = path.join(store.imagesDir, name);
+  if (fs.existsSync(file)) return name;
+  try {
+    const r = await http(url);
+    if (!r.ok) return null;
+    await fsp.writeFile(file, Buffer.from(await r.arrayBuffer()));
+    return name;
+  } catch { return null; }
+}
+
+// Title logo: fanart.tv (if key) first, then TMDB's own logos. English, then language-neutral.
+const pickLang = (list, langOf) => {
+  const want = ['en', '00', '', null, undefined];
+  for (const l of want) { const hit = list.find(x => langOf(x) === l); if (hit) return hit; }
+  return list[0];
+};
+async function fanartLogo(kind, id, settings) {
+  const key = (settings.fanartKey || '').trim();
+  if (!key || !id) return null;
+  try {
+    const r = await http(`https://webservice.fanart.tv/v3/${kind}/${id}?api_key=${encodeURIComponent(key)}`);
+    if (!r.ok) return null;
+    const j = await r.json();
+    const list = kind === 'movies' ? [...(j.hdmovielogo || []), ...(j.movielogo || [])] : [...(j.hdtvlogo || []), ...(j.clearlogo || [])];
+    if (!list.length) return null;
+    const sorted = [...list].sort((a, b) => (+b.likes || 0) - (+a.likes || 0));
+    return pickLang(sorted, x => x.lang)?.url || null;
+  } catch (e) { if (e instanceof OfflineError) throw e; return null; }
+}
+async function titleLogo(store, kind, fanartId, images, settings) {
+  const fan = await fanartLogo(kind, fanartId, settings);
+  if (fan) { const n = await cacheUrl(store, fan); if (n) return n; }
+  const logos = (images?.logos || []).filter(l => !/\.svg$/i.test(l.file_path));
+  if (!logos.length) return null;
+  const best = pickLang([...logos].sort((a, b) => (b.vote_average || 0) - (a.vote_average || 0)), x => x.iso_639_1);
+  return cacheImage(store, best.file_path, 'w500');
+}
+const recIds = d => [...new Set([...(d.recommendations?.results || []), ...(d.similar?.results || [])].map(r => r.id))].slice(0, 60);
+
 async function omdb(imdbId, settings) {
   if (!settings.omdbKey || !imdbId) return {};
   try {
@@ -107,13 +150,14 @@ async function fetchMovie(store, item, settings) {
     if (!hit) return null;
     id = hit.id;
   }
-  const d = await tmdb(`/movie/${id}`, { append_to_response: 'credits,videos,release_dates' }, settings);
+  const d = await tmdb(`/movie/${id}`, { append_to_response: 'credits,videos,release_dates,images,recommendations,similar', include_image_language: 'en,null' }, settings);
   const usCert = (d.release_dates?.results || []).find(r => r.iso_3166_1 === 'US')?.release_dates?.find(x => x.certification)?.certification;
-  const [poster, backdrop, cast, extra] = await Promise.all([
+  const [poster, backdrop, cast, extra, logo] = await Promise.all([
     cacheImage(store, d.poster_path, 'w500'),
     cacheImage(store, d.backdrop_path, 'w1280'),
     castList(store, d.credits),
-    omdb(d.imdb_id, settings)
+    omdb(d.imdb_id, settings),
+    titleLogo(store, 'movies', d.id, d.images, settings)
   ]);
   return {
     tmdbId: d.id, imdbId: d.imdb_id || null, title: d.title, originalTitle: d.original_title,
@@ -125,7 +169,8 @@ async function fetchMovie(store, item, settings) {
     directors: (d.credits?.crew || []).filter(c => c.job === 'Director').map(c => c.name),
     writers: [...new Set((d.credits?.crew || []).filter(c => c.department === 'Writing').map(c => c.name))].slice(0, 3),
     trailerKey: trailer(d.videos), languages: (d.spoken_languages || []).map(l => l.english_name),
-    collection: d.belongs_to_collection?.name || null, fetchedAt: Date.now()
+    collection: d.belongs_to_collection?.name || null, collectionId: d.belongs_to_collection?.id || null,
+    logo, recIds: recIds(d), schema: 2, fetchedAt: Date.now()
   };
 }
 
@@ -141,14 +186,15 @@ async function fetchTv(store, item, settings) {
     if (!hit) return null;
     id = hit.id;
   }
-  const d = await tmdb(`/tv/${id}`, { append_to_response: 'credits,aggregate_credits,external_ids,videos,content_ratings' }, settings);
+  const d = await tmdb(`/tv/${id}`, { append_to_response: 'credits,aggregate_credits,external_ids,videos,content_ratings,images,recommendations,similar', include_image_language: 'en,null' }, settings);
   const imdbId = d.external_ids?.imdb_id || null;
   const cert = (d.content_ratings?.results || []).find(r => r.iso_3166_1 === 'US')?.rating;
-  const [poster, backdrop, cast, extra] = await Promise.all([
+  const [poster, backdrop, cast, extra, logo] = await Promise.all([
     cacheImage(store, d.poster_path, 'w500'),
     cacheImage(store, d.backdrop_path, 'w1280'),
     castList(store, d.aggregate_credits?.cast?.length ? { cast: d.aggregate_credits.cast.map(c => ({ ...c, character: c.roles?.[0]?.character })) } : d.credits),
-    omdb(imdbId, settings)
+    omdb(imdbId, settings),
+    titleLogo(store, 'tv', d.external_ids?.tvdb_id, d.images, settings)
   ]);
 
   // Seasons you actually have on disk
@@ -178,7 +224,7 @@ async function fetchTv(store, item, settings) {
     ...extra, poster, backdrop, cast,
     creators: (d.created_by || []).map(c => c.name), networks: (d.networks || []).map(n => n.name),
     status: d.status, numberOfSeasons: d.number_of_seasons, numberOfEpisodes: d.number_of_episodes,
-    trailerKey: trailer(d.videos), seasons, fetchedAt: Date.now()
+    trailerKey: trailer(d.videos), seasons, logo, recIds: recIds(d), schema: 2, fetchedAt: Date.now()
   };
 }
 
@@ -217,6 +263,7 @@ async function runQueue(store, { onProgress, onItem, onError, retryNotFound = fa
         if (missing) it.metaStatus = 'pending';
       }
     }
+    for (const it of Object.values(store.data.items)) if (it.metaStatus === 'ok' && it.meta && (it.meta.schema || 1) < 2) it.metaStatus = 'pending';
     const todo = Object.values(store.data.items).filter(i =>
       i.metaStatus === 'pending' || i.metaStatus === 'error' || (retryNotFound && i.metaStatus === 'notfound'));
     let done = 0;

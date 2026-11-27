@@ -199,6 +199,11 @@ ipcMain.handle('save-settings', (_e, patch) => {
     for (const it of Object.values(store.data.items)) if (it.metaStatus === 'ok' && !it.meta?.imdbRating) it.metaStatus = 'pending';
     fetchMeta();
   }
+  // New fanart.tv key: fetch title logos for everything missing one
+  if (patch.fanartKey && patch.fanartKey !== before.fanartKey) {
+    for (const it of Object.values(store.data.items)) if (it.metaStatus === 'ok' && !it.meta?.logo) it.metaStatus = 'pending';
+    fetchMeta();
+  }
   return stateForUi();
 });
 ipcMain.handle('refresh-item', async (_e, id) => {

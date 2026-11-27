@@ -54,6 +54,37 @@ function continueList() {
   return out.sort((a, b) => b.at - a.at).slice(0, 12);
 }
 
+/* Title as artwork (logo) when we have one, plain text otherwise */
+function titleArt(it, cls) {
+  const m = it.meta || {}, t = m.title || it.title;
+  return m.logo
+    ? `<h1 class="${cls} has-logo"><img class="title-logo" src="${img(m.logo)}" alt="${esc(t)}"></h1>`
+    : `<h1 class="${cls}">${esc(t)}</h1>`;
+}
+
+/* Titles you own that TMDB says are similar */
+function moreLikeThis(it) {
+  const m = it.meta || {};
+  const want = new Set(m.recIds || []);
+  const out = want.size ? S.items.filter(o => o.id !== it.id && o.type === it.type && want.has(o.meta?.tmdbId)) : [];
+  if (out.length < 6 && m.genres?.length) {
+    const g = new Set(m.genres), have = new Set(out.map(o => o.id));
+    const extra = S.items.filter(o => o.id !== it.id && !have.has(o.id) && o.type === it.type && o.meta?.collectionId !== m.collectionId)
+      .map(o => ({ o, n: (o.meta?.genres || []).filter(x => g.has(x)).length })).filter(x => x.n >= 2)
+      .sort((a, b) => b.n - a.n || (ratingValue(b.o) || 0) - (ratingValue(a.o) || 0)).map(x => x.o);
+    out.push(...extra.slice(0, 18 - out.length));
+  }
+  return out.slice(0, 18);
+}
+function collectionOf(it) {
+  const cid = it.meta?.collectionId; if (!cid) return [];
+  return S.items.filter(o => o.meta?.collectionId === cid)
+    .sort((a, b) => String(a.meta?.releaseDate || a.year).localeCompare(String(b.meta?.releaseDate || b.year)));
+}
+function miniRow(title, list) {
+  return `<div><h3 class="h3">${esc(title)}</h3><div class="row mini-row">${list.map((o, i) => cardHtml(o, i)).join('')}</div></div>`;
+}
+
 /* ================= Cards ================= */
 function cardHtml(it, i = 0, land = false) {
   const r = ratingValue(it);
@@ -156,6 +187,13 @@ function homeHtml() {
   if (movies.length) out += rowHtml('Movies', movies.sort((a, b) => addedAt(b) - addedAt(a)).slice(0, 24).map((it, i) => cardHtml(it, i)).join(''), 'movies');
   if (shows.length) out += rowHtml('TV shows', shows.sort((a, b) => addedAt(b) - addedAt(a)).slice(0, 24).map((it, i) => cardHtml(it, i)).join(''), 'tv');
 
+  const cols = {};
+  for (const it of movies) if (it.meta?.collectionId) (cols[it.meta.collectionId] ||= []).push(it);
+  Object.values(cols).filter(l => l.length >= 2).sort((a, b) => b.length - a.length).slice(0, 4).forEach(l => {
+    l.sort((a, b) => String(a.meta?.releaseDate || a.year).localeCompare(String(b.meta?.releaseDate || b.year)));
+    out += rowHtml(l[0].meta.collection || 'Collection', l.map((it, i) => cardHtml(it, i)).join(''));
+  });
+
   const genres = {};
   for (const it of all) for (const g of it.meta?.genres || []) (genres[g] ||= []).push(it);
   Object.entries(genres).filter(([, l]) => l.length >= 4).sort((a, b) => b[1].length - a[1].length).slice(0, 6)
@@ -187,7 +225,7 @@ function heroHtml() {
 function heroTextHtml(it) {
   const m = it.meta || {};
   return `<div class="hero-text">
-    <h1 class="hero-title swap">${esc(m.title || it.title)}</h1>
+    ${titleArt(it, 'hero-title swap')}
     ${metaLine(it)}
     ${ratingsHtml(m)}
     ${m.overview ? `<p class="hero-overview">${esc(m.overview)}</p>` : ''}
@@ -501,7 +539,7 @@ function openDetail(id, { keepSeason } = {}) {
     <div class="detail-back"><button class="icon-btn" id="detailClose" aria-label="Back">${icon('left')}</button></div>
     <div class="d-stage"><div class="bg" id="dBg">${m.backdrop ? `<img src="${img(m.backdrop)}" alt="">` : `<div class="thumb-fallback" style="--h:${hueOf(it.title)};position:absolute;inset:0"></div>`}</div><div class="dim"></div><div class="lb top"></div></div>
     <div class="d-content">
-      <div style="display:grid;gap:12px"><h1 class="detail-title">${esc(m.title || it.title)}</h1>${m.tagline ? `<p class="tagline">${esc(m.tagline)}</p>` : ''}${metaLine(it)}</div>
+      <div style="display:grid;gap:12px">${titleArt(it, 'detail-title')}${m.tagline ? `<p class="tagline">${esc(m.tagline)}</p>` : ''}${metaLine(it)}</div>
       ${stats.length ? `<div class="stats">${stats.map(([k, v]) => `<div class="stat"><small>${k}</small><b>${v}</b></div>`).join('')}</div>`
         : (it.metaStatus === 'notfound' ? `<p style="color:var(--text-3)">We couldn't match this title automatically. Use “Fix match” to pick the right one.</p>` : '')}
       <div class="detail-actions">
@@ -517,6 +555,8 @@ function openDetail(id, { keepSeason } = {}) {
         ${seasonNums.length > 1 ? `<div class="seasons" role="group" aria-label="Seasons" style="margin:12px 0 10px">${seasonNums.map(sn => `<button class="chip" data-season="${sn}" aria-pressed="${sn === curSeason}">${esc(m.seasons?.[sn]?.name || 'Season ' + sn)}</button>`).join('')}</div>` : ''}
         <div class="episodes" id="eps">${episodesHtml(it, curSeason)}</div></div>` : ''}
       ${m.cast?.length ? `<div><h3 class="h3">Cast</h3><div class="cast">${m.cast.map(c => `<div class="person"><div class="ph">${c.photo ? `<img src="${img(c.photo)}" alt="" loading="lazy">` : esc(c.name[0])}</div><b>${esc(c.name)}</b><small>${esc(c.character)}</small></div>`).join('')}</div></div>` : ''}
+      ${(() => { const c = collectionOf(it); return c.length > 1 ? miniRow(m.collection || 'Collection', c) : ''; })()}
+      ${(() => { const ml = moreLikeThis(it); return ml.length ? miniRow('More like this', ml) : ''; })()}
       <div><h3 class="h3">On your PC</h3><div class="file-list">${(it.type === 'tv' ? [it.root] : it.files).map(f => `<div style="display:flex;gap:10px;align-items:center;justify-content:space-between"><code>${esc(f)}</code><button class="btn quiet sm" data-reveal="${esc(f)}">${icon('folder', 'sm')}Show in folder</button></div>`).join('')}</div></div>
     </div>`;
   if (!reopening) { layer.hidden = false; layer.classList.remove('out'); layer.scrollTop = 0; document.body.style.overflow = 'hidden'; }
@@ -675,6 +715,8 @@ function openSettings() {
           <small>Posters, cast, plot, episodes. Get one at <a data-link="https://www.themoviedb.org/settings/api">themoviedb.org → Settings → API</a></small></label>
         <label class="field"><span>OMDb API key</span><input class="input" id="sOmdb" value="${esc(s.omdbKey)}" spellcheck="false" autocomplete="off" placeholder="e.g. a1b2c3d4">
           <small>Adds IMDb and Rotten Tomatoes scores. Get one at <a data-link="https://www.omdbapi.com/apikey.aspx">omdbapi.com/apikey.aspx</a> (free: 1,000 a day)</small></label>
+        <label class="field"><span>Fanart.tv API key <em style="font-style:normal;color:var(--text-3)">· optional</em></span><input class="input" id="sFanart" value="${esc(s.fanartKey)}" spellcheck="false" autocomplete="off">
+          <small>More and better title logos for the big home screen. Get one at <a data-link="https://fanart.tv/get-an-api-key/">fanart.tv/get-an-api-key</a></small></label>
       </section>
 
       <section class="group"><h3>Subtitles</h3><p class="hint">When a video has no subtitle file, Showtrove downloads one and saves it next to the video, so KMPlayer and VLC load it too.</p>
@@ -685,6 +727,8 @@ function openSettings() {
           <label class="field"><span>OpenSubtitles username</span><input class="input" id="sOsUser" value="${esc(s.opensubtitlesUser)}" autocomplete="off"><small>Optional, raises the daily limit</small></label>
           <label class="field"><span>OpenSubtitles password</span><input class="input" id="sOsPass" type="password" value="${esc(s.opensubtitlesPass)}" autocomplete="off"></label>
         </div>
+        <label class="field"><span>SubDL API key <em style="font-style:normal;color:var(--text-3)">· backup source</em></span><input class="input" id="sSubdl" value="${esc(s.subdlKey)}" spellcheck="false" autocomplete="off">
+          <small>Used when OpenSubtitles has nothing or hits its daily limit. Get one at <a data-link="https://subdl.com">subdl.com</a> → profile → API key (free)</small></label>
         <label class="field"><span>Subtitle languages, in order</span><input class="input" id="sLangs" value="${esc(s.subtitleLanguages)}" spellcheck="false">
           <small>Two-letter codes separated by commas, e.g. <b>en, si</b> for English then Sinhala</small></label>
       </section>
@@ -732,7 +776,7 @@ function openSettings() {
     const tm = $('#sTmdb').value.trim();
     if (tm && !/^[A-Za-z0-9._-]{20,}$/.test(tm)) { const f = $('#sTmdb'); f.classList.remove('shake'); void f.offsetWidth; f.classList.add('shake'); toast('That TMDB key looks incomplete. Paste the whole key.'); return; }
     const st = await api.saveSettings({
-      tmdbKey: tm, omdbKey: $('#sOmdb').value.trim(),
+      tmdbKey: tm, omdbKey: $('#sOmdb').value.trim(), fanartKey: $('#sFanart').value.trim(), subdlKey: $('#sSubdl').value.trim(),
       opensubtitlesKey: $('#sOsKey').value.trim(), opensubtitlesUser: $('#sOsUser').value.trim(), opensubtitlesPass: $('#sOsPass').value,
       subtitleLanguages: $('#sLangs').value.toLowerCase().replace(/[^a-z,-]/g, '') || 'en', autoSubtitles: $('#sAutoSub').checked,
       defaultPlayer: $('#sPlayer').value, kmplayerPath: $('#sKmp').value.trim(), vlcPath: $('#sVlc').value.trim(), customPlayerPath: $('#sCustom').value.trim()

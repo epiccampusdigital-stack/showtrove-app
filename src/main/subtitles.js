@@ -189,6 +189,94 @@ async function osDownload(settings, fileId, videoPath, lang) {
   return target;
 }
 
+// ---------- SubDL (backup source) ----------
+// Tiny .zip reader: SubDL ships subtitles zipped. Handles stored + deflated entries.
+function unzipEntries(buf) {
+  const zlib = require('zlib');
+  let eocd = -1;
+  for (let i = buf.length - 22; i >= Math.max(0, buf.length - 65557); i--) if (buf.readUInt32LE(i) === 0x06054b50) { eocd = i; break; }
+  if (eocd < 0) return [];
+  const count = buf.readUInt16LE(eocd + 10);
+  let p = buf.readUInt32LE(eocd + 16);
+  const out = [];
+  for (let n = 0; n < count && p + 46 <= buf.length; n++) {
+    if (buf.readUInt32LE(p) !== 0x02014b50) break;
+    const method = buf.readUInt16LE(p + 10), csize = buf.readUInt32LE(p + 20);
+    const nameLen = buf.readUInt16LE(p + 28), extraLen = buf.readUInt16LE(p + 30), commentLen = buf.readUInt16LE(p + 32);
+    const local = buf.readUInt32LE(p + 42);
+    const name = buf.slice(p + 46, p + 46 + nameLen).toString('utf8');
+    p += 46 + nameLen + extraLen + commentLen;
+    if (name.endsWith('/')) continue;
+    const lnl = buf.readUInt16LE(local + 26), lel = buf.readUInt16LE(local + 28);
+    const start = local + 30 + lnl + lel;
+    out.push({ name, get: () => method === 8 ? zlib.inflateRawSync(buf.slice(start, start + csize)) : buf.slice(start, start + csize) });
+  }
+  return out;
+}
+
+const SUB_EXT = /\.(srt|ass|ssa|vtt)$/i;
+function pickZipEntry(entries, season, episode) {
+  const subs = entries.filter(e => SUB_EXT.test(e.name));
+  if (!subs.length) return null;
+  if (season != null && episode != null) {
+    const re = new RegExp(`(s0*${season}[ ._-]*e0*${episode}(?!\\d))|(\\b0*${season}x0*${episode}(?!\\d))`, 'i');
+    const hit = subs.find(e => re.test(e.name));
+    if (hit) return hit;
+  }
+  return subs.find(e => /\.srt$/i.test(e.name)) || subs[0];
+}
+
+async function subdlFetch(videoPath, ctx, settings, langs) {
+  const key = (settings.subdlKey || '').trim();
+  const imdb = ctx.parentImdbId || ctx.imdbId;
+  if (!key || (!imdb && !ctx.title)) return null;
+  const isTv = ctx.parentImdbId && ctx.season != null;
+  const p = new URLSearchParams({ api_key: key, subs_per_page: '30', languages: langs.map(l => l.toUpperCase()).join(',') });
+  if (imdb) p.set('imdb_id', imdb); else p.set('film_name', ctx.title);
+  p.set('type', isTv ? 'tv' : 'movie');
+  if (isTv) { p.set('season_number', ctx.season); p.set('episode_number', ctx.episode); }
+  const r = await fetch(`https://api.subdl.com/api/v1/subtitles?${p}`, { headers: { 'User-Agent': UA } });
+  if (!r.ok) return null;
+  const j = await r.json();
+  let list = (j.subtitles || []).filter(x => x.url);
+  if (isTv) {
+    const exact = list.filter(x => +x.episode === +ctx.episode || x.episode == null);
+    if (exact.length) list = exact;
+  }
+  if (!list.length) return null;
+  const rank = l => { const i = langs.indexOf(String(l || '').toLowerCase()); return i === -1 ? 99 : i; };
+  list.sort((a, b) => rank(a.lang) - rank(b.lang) || (a.hi ? 1 : 0) - (b.hi ? 1 : 0));
+  for (const s of list.slice(0, 3)) {
+    try {
+      const z = await fetch(`https://dl.subdl.com${s.url}`, { headers: { 'User-Agent': UA } });
+      if (!z.ok) continue;
+      const buf = Buffer.from(await z.arrayBuffer());
+      const entry = /\.zip$/i.test(s.url) || buf.readUInt32LE(0) === 0x04034b50 ? pickZipEntry(unzipEntries(buf), ctx.season, ctx.episode) : { name: 'sub.srt', get: () => buf };
+      if (!entry) continue;
+      const lang = String(s.lang || langs[0] || 'en').toLowerCase().slice(0, 2);
+      const target = await saveNextTo(videoPath, entry.get(), lang, path.extname(entry.name).toLowerCase() || '.srt');
+      return { path: target, lang };
+    } catch { /* try the next one */ }
+  }
+  return null;
+}
+
+async function saveNextTo(videoPath, buf, lang, ext = '.srt') {
+  const { dir, name } = path.parse(videoPath);
+  let target = path.join(dir, `${name}${ext}`);
+  if (fs.existsSync(target)) target = path.join(dir, `${name}.${lang || 'sub'}${ext}`);
+  if (fs.existsSync(target)) target = path.join(dir, `${name}.${lang || 'sub'}.${Date.now()}${ext}`);
+  try { await fsp.writeFile(target, buf); }
+  catch {
+    const { app } = require('electron');
+    const alt = path.join(app.getPath('userData'), 'subtitles');
+    await fsp.mkdir(alt, { recursive: true });
+    target = path.join(alt, `${name}.${lang || 'sub'}${ext}`);
+    await fsp.writeFile(target, buf);
+  }
+  return target;
+}
+
 function pickBest(results, langOrder) {
   const rank = l => { const i = langOrder.indexOf((l || '').toLowerCase()); return i === -1 ? 99 : i; };
   return [...results].sort((a, b) =>
@@ -205,22 +293,36 @@ function pickBest(results, langOrder) {
  */
 async function ensureSubtitles(videoPath, ctx, settings, { force = false } = {}) {
   let local = await findLocalSubs(videoPath);
-  if ((local.length && !force) || !settings.opensubtitlesKey) return { subs: local, downloaded: null };
+  if ((local.length && !force) || (!settings.opensubtitlesKey && !settings.subdlKey)) return { subs: local, downloaded: null };
   const langs = (settings.subtitleLanguages || 'en').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
   const languages = langs.join(',');
-  const hash = await osHash(videoPath).catch(() => null);
+  let saved = null, lang = null, lastErr = null;
 
-  let results = [];
-  if (hash) results = await osSearch(settings, { hash, languages }).catch(() => []);
-  if (!results.length) results = await osSearch(settings, { ...ctx, languages }).catch(() => []);
-  if (!results.length && ctx.title) results = await osSearch(settings, { query: ctx.title + (ctx.year ? ` ${ctx.year}` : ''), languages });
-  if (!results.length) return { subs: local, downloaded: null };
+  // 1) OpenSubtitles
+  if (settings.opensubtitlesKey) {
+    try {
+      const hash = await osHash(videoPath).catch(() => null);
+      let results = [];
+      if (hash) results = await osSearch(settings, { hash, languages }).catch(() => []);
+      if (!results.length) results = await osSearch(settings, { ...ctx, languages }).catch(() => []);
+      if (!results.length && ctx.title) results = await osSearch(settings, { query: ctx.title + (ctx.year ? ` ${ctx.year}` : ''), languages }).catch(() => []);
+      if (results.length) {
+        const best = pickBest(results, langs);
+        saved = await osDownload(settings, best.fileId, videoPath, best.lang);
+        lang = best.lang;
+      }
+    } catch (e) { lastErr = e; }
+  }
+  // 2) SubDL, when OpenSubtitles had nothing or hit its limit
+  if (!saved && settings.subdlKey) {
+    const r = await subdlFetch(videoPath, ctx, settings, langs).catch(() => null);
+    if (r) { saved = r.path; lang = r.lang; }
+  }
+  if (!saved) { if (lastErr) throw lastErr; return { subs: local, downloaded: null }; }
 
-  const best = pickBest(results, langs);
-  const saved = await osDownload(settings, best.fileId, videoPath, best.lang);
   local = await findLocalSubs(videoPath);
-  if (!local.find(s => s.path === saved)) local.push({ path: saved, lang: best.lang, label: (LANG_NAMES[best.lang] || best.lang) + ' · downloaded' });
+  if (!local.find(s => s.path === saved)) local.push({ path: saved, lang, label: (LANG_NAMES[lang] || lang) + ' · downloaded' });
   return { subs: local, downloaded: saved };
 }
 
-module.exports = { findLocalSubs, loadAsVtt, srtToVtt, assToVtt, osHash, osSearch, osDownload, ensureSubtitles, LANG_NAMES };
+module.exports = { unzipEntries, pickZipEntry, subdlFetch, findLocalSubs, loadAsVtt, srtToVtt, assToVtt, osHash, osSearch, osDownload, ensureSubtitles, LANG_NAMES };

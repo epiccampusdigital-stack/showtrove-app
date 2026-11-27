@@ -32,7 +32,7 @@ class Store {
 
   get settings() {
     return {
-      tmdbKey: '', omdbKey: '', opensubtitlesKey: '', opensubtitlesUser: '', opensubtitlesPass: '',
+      tmdbKey: '', omdbKey: '', fanartKey: '', subdlKey: '', opensubtitlesKey: '', opensubtitlesUser: '', opensubtitlesPass: '',
       subtitleLanguages: 'en', autoSubtitles: true,
       defaultPlayer: 'ask', // ask | builtin | kmplayer | vlc | potplayer | mpc | system | custom
       customPlayerPath: '', kmplayerPath: '', vlcPath: '',
