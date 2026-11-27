@@ -1,0 +1,63 @@
+{
+  "name": "showtrove",
+  "productName": "Showtrove",
+  "version": "1.0.1",
+  "description": "Your own treasure chest of movies and shows, offline-first",
+  "main": "src/main/main.js",
+  "author": "EPIC",
+  "license": "UNLICENSED",
+  "scripts": {
+    "start": "electron .",
+    "test": "node test/run-tests.js",
+    "dist": "electron-builder --win nsis --x64",
+    "dist:linux-installer": "bash build/make-installer.sh",
+    "dist:portable": "electron-builder --win dir --x64",
+    "release": "electron-builder --win nsis --x64 --publish always"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "live.epic.showtrove",
+    "productName": "Showtrove",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "Showtrove",
+      "perMachine": false,
+      "artifactName": "Showtrove-Setup-${version}.${ext}",
+      "uninstallDisplayName": "Showtrove",
+      "deleteAppDataOnUninstall": false
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "coreframeagency",
+        "repo": "showstrove-app",
+        "releaseType": "release"
+      }
+    ]
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.11"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/coreframeagency/showstrove-app.git"
+  }
+}
