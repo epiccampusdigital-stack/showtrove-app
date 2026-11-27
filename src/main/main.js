@@ -273,6 +273,12 @@ app.whenReady().then(async () => {
   if (process.env.CV_HOOK) require(process.env.CV_HOOK)(win, app); // test automation only
   setupUpdates();
 
+  // Safety net: rescan every 10 minutes and when you come back to the window
+  let lastScan = Date.now();
+  const softRescan = () => { if (Date.now() - lastScan > 60000) { lastScan = Date.now(); rescan(); } };
+  setInterval(softRescan, 10 * 60 * 1000);
+  win.on('focus', softRescan);
+
   // Came back online? Fetch whatever was waiting.
   let wasOnline = net.isOnline();
   setInterval(() => {
@@ -301,6 +307,24 @@ function setupUpdates() {
   setInterval(check, 4 * 60 * 60 * 1000);
 }
 ipcMain.handle('app-version', () => app.getVersion());
+
+/* ---------- Hidden titles + PIN ---------- */
+const crypto = require('crypto');
+const pinHash = pin => crypto.createHash('sha256').update('showtrove:' + String(pin)).digest('hex');
+ipcMain.handle('set-hidden', (_e, { id, hidden }) => {
+  const it = store.data.items[id]; if (!it) return stateForUi();
+  it.hidden = !!hidden;
+  if (!hidden && it.metaStatus === 'skipped') { it.metaStatus = 'pending'; fetchMeta(); }
+  store.save();
+  return stateForUi();
+});
+ipcMain.handle('pin-status', () => ({ set: !!store.data.pin }));
+ipcMain.handle('pin-check', (_e, pin) => !!store.data.pin && store.data.pin === pinHash(pin));
+ipcMain.handle('pin-set', (_e, { pin, old }) => {
+  if (store.data.pin && store.data.pin !== pinHash(old)) return false;
+  if (!/^\d{4,8}$/.test(String(pin))) return false;
+  store.data.pin = pinHash(pin); store.save(); return true;
+});
 
 app.on('before-quit', () => { try { store.flush(); } catch { /* ignore */ } });
 app.on('window-all-closed', () => app.quit());

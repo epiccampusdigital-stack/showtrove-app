@@ -868,3 +868,19 @@ body.no-hero-auto .tile .timer { display: none; }
 .upd-pill i { width: 8px; height: 8px; border-radius: 50%; background: currentColor; animation: pulse 1.4s ease-in-out infinite; }
 .upd-pill[data-state="downloading"] { background: oklch(1 0 0 / .12); color: var(--text); box-shadow: inset 0 0 0 1px var(--line-2); }
 @keyframes pulse { 50% { opacity: .3; } }
+
+/* NEW badge */
+.new-badge { position: absolute; top: 10px; left: 10px; z-index: 2; padding: 4px 9px; border-radius: 99px; font: 700 11px/1 var(--font-ui); letter-spacing: .06em; text-transform: uppercase; color: #0b0b0f; background: oklch(0.86 0.16 150); box-shadow: 0 4px 14px oklch(0 0 0 / .35); }
+/* Hidden tab chip */
+.lock-chip { display: inline-flex; align-items: center; gap: 6px; }
+.lock-chip .ic { width: 15px; height: 15px; }
+/* PIN pad */
+.modal.pin-modal { width: min(380px, 100%); }
+.pin-body { justify-items: center; text-align: center; gap: 16px !important; }
+.pin-input { width: 220px; text-align: center; font-size: 28px; letter-spacing: .5em; padding-left: .5em; }
+.pin-pad { display: grid; grid-template-columns: repeat(3, 72px); gap: 10px; }
+.pin-k { height: 56px; border-radius: 16px; font: 600 22px var(--font-ui); background: oklch(1 0 0 / .06); box-shadow: inset 0 0 0 1px var(--line); }
+.pin-k:hover { background: oklch(1 0 0 / .12); }
+.pin-k:active { transform: scale(.96); }
+.pin-k[data-k="✓"] { background: var(--accent); color: var(--on-accent); }
+.err { color: oklch(0.72 0.17 25); font-size: 14px; }

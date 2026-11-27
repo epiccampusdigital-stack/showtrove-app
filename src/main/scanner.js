@@ -48,6 +48,21 @@ async function walk(dir, out = [], skipped = []) {
   return out;
 }
 
+// Adult content: folder/file names that clearly say so. TMDB's "adult" flag is checked too.
+const ADULT_RE = /(^|[^a-z])(xxx|porn\w*|nsfw|onlyfans|brazzers|bangbros|reality ?kings|naughty ?america|blacked(raw)?|tushy|pornhub|xvideos|xhamster|spankbang|eporner|x-?rated|18\+)([^a-z]|$)/i;
+const ADULT_DIR_RE = /^(adults?( only)?|18\+|xxx|porn|nsfw|private)$/i;
+function looksAdult(filePath, root) {
+  const rel = path.relative(root, filePath);
+  if (ADULT_RE.test(rel)) return true;
+  return rel.split(path.sep).slice(0, -1).some(d => ADULT_DIR_RE.test(d.trim()));
+}
+
+// When the file landed on the drive (creation time on Windows), so "Newly added" means newly added
+async function fileDate(p) {
+  try { const st = await fsp.stat(p); const t = st.birthtimeMs && st.birthtimeMs > 0 ? Math.min(st.birthtimeMs, st.mtimeMs || Infinity) : st.mtimeMs; return Math.round(t) || Date.now(); }
+  catch { return Date.now(); }
+}
+
 const keyOf = p => (p.type === 'tv' ? 't:' : 'm:') + p.title.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim() + (p.year ? '|' + p.year : '');
 
 /**
@@ -60,31 +75,39 @@ async function scanLibrary(store) {
   const liveRoots = [];
   let added = 0;
   const skipped = [], offline = [];
+  const owner = new Map(); // movie file -> item it currently belongs to
+  for (const it of Object.values(items)) if (it.type === 'movie') for (const f of it.files) owner.set(f, it);
 
   for (const root of store.data.folders) {
     if (!fs.existsSync(root)) { offline.push(root); continue; } // drive unplugged: keep its items, don't delete
     liveRoots.push(root);
     const files = await walk(root, [], skipped);
+    const perDir = {};
+    for (const f of files) { const d = path.dirname(f.path); perDir[d] = (perDir[d] || 0) + 1; }
     for (const f of files) {
-      const p = parseFile(f.path, root);
+      const p = parseFile(f.path, root, { siblings: perDir[path.dirname(f.path)] });
       const id = keyOf(p);
       seen.add(id);
       let it = items[id];
       if (!it) {
         it = items[id] = {
           id, type: p.type, title: p.title, year: p.year || null, root,
-          addedAt: Date.now(), files: [], episodes: {}, meta: null, metaStatus: 'pending'
+          addedAt: await fileDate(f.path), dateFromFile: true, files: [], episodes: {}, meta: null, metaStatus: 'pending'
         };
         added++;
-      }
+      } else if (!it.dateFromFile) { it.addedAt = await fileDate(f.path); it.dateFromFile = true; } // fix older entries once
       it.root = root;
+      if (looksAdult(f.path, root)) it.autoAdult = true;
       if (p.type === 'movie') {
+        const prevOwner = owner.get(f.path);
+        if (prevOwner && prevOwner !== it) prevOwner.files = prevOwner.files.filter(x => x !== f.path);
+        owner.set(f.path, it);
         if (!it.files.includes(f.path)) it.files.push(f.path);
         it.files = it.files.filter(x => fs.existsSync(x)).sort();
       } else {
         const ek = `${p.season}x${p.episode}`;
         const prev = it.episodes[ek] || {};
-        it.episodes[ek] = { ...prev, season: p.season, episode: p.episode, episodeEnd: p.episodeEnd, path: f.path, addedAt: prev.addedAt || Date.now() };
+        it.episodes[ek] = { ...prev, season: p.season, episode: p.episode, episodeEnd: p.episodeEnd, path: f.path, addedAt: prev.addedAt && prev.dateFromFile ? prev.addedAt : await fileDate(f.path), dateFromFile: true };
         it.latestAt = Math.max(it.latestAt || 0, it.episodes[ek].addedAt);
       }
     }
@@ -140,4 +163,4 @@ function watchFolders(store, onChange) {
   return () => watchers.forEach(w => w.close());
 }
 
-module.exports = { scanLibrary, watchFolders, walk };
+module.exports = { scanLibrary, watchFolders, walk, looksAdult };

@@ -181,7 +181,7 @@ async function fetchMovie(store, item, settings) {
     writers: [...new Set((d.credits?.crew || []).filter(c => c.department === 'Writing').map(c => c.name))].slice(0, 3),
     trailerKey: trailer(d.videos), languages: (d.spoken_languages || []).map(l => l.english_name),
     collection: d.belongs_to_collection?.name || null, collectionId: d.belongs_to_collection?.id || null,
-    logo, recIds: recIds(d), schema: 2, fetchedAt: Date.now()
+    logo, recIds: recIds(d), adult: !!d.adult, schema: 2, fetchedAt: Date.now()
   };
 }
 
@@ -276,6 +276,8 @@ async function runQueue(store, { onProgress, onItem, onError, retryNotFound = fa
       }
     }
     for (const it of Object.values(store.data.items)) if (it.metaStatus === 'ok' && it.meta && (it.meta.schema || 1) < 2) it.metaStatus = 'pending';
+    // Adult files are never sent to TMDB (they'd only match the wrong movie anyway)
+    for (const it of Object.values(store.data.items)) if (it.autoAdult && it.hidden !== false && it.metaStatus === 'pending') it.metaStatus = 'skipped';
     const todo = Object.values(store.data.items).filter(i =>
       i.metaStatus === 'pending' || i.metaStatus === 'error' || (retryNotFound && i.metaStatus === 'notfound'));
     let done = 0;

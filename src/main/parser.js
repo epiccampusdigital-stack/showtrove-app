@@ -131,7 +131,7 @@ function showFromDirs(parentDirs) {
  * @param {string} filePath absolute path to the video
  * @param {string} root the library folder it was found in
  */
-function parseFile(filePath, root) {
+function parseFile(filePath, root, { siblings = 1 } = {}) {
   const rel = path.relative(root, filePath);
   const parts = rel.split(path.sep);
   const fileName = parts.pop();
@@ -142,7 +142,10 @@ function parseFile(filePath, root) {
 
   // Movie: compare file name vs. its folder name, keep whichever looks better (has a year).
   const fromFile = parseMovieName(path.parse(fileName).name);
-  if (parentDirs.length) {
+  // Only trust the folder name when it holds a single video ("Inception (2010)/movie.mkv").
+  // A folder with several different movies must not rename them all after itself.
+  const junkName = /^(movie|video|film|sample|main|feature)?[\s._-]*\d*$/i.test(fromFile.title || '');
+  if (parentDirs.length && (siblings <= 1 || junkName)) {
     const fromDir = parseMovieName(parentDirs[0]);
     if (fromDir.year && !fromFile.year) return { type: 'movie', ...fromDir };
     if (fromDir.year && fromFile.year && fromDir.title.length >= 2 && /^(movie|video|film)?\s*\d*$/i.test(fromFile.title)) {

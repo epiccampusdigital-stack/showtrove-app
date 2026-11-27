@@ -5,11 +5,21 @@
 const S = {
   items: [], progress: {}, settings: {}, players: [], folders: [], online: true,
   view: 'home', lastView: 'home', query: '',
-  lib: { movies: { genre: 'All', sort: 'added' }, tv: { genre: 'All', sort: 'added' } },
+  lib: { movies: { genre: 'All', sort: 'added', year: 'all', hidden: false }, tv: { genre: 'All', sort: 'added', year: 'all' } },
+  hiddenUnlocked: false,
   metaBusy: false, detailId: null, firstPaint: true
 };
 const VIEWS = ['home', 'movies', 'tv'];
-const byId = id => S.items.find(i => i.id === id);
+const byId = id => (S.allItems || S.items).find(i => i.id === id);
+const isHidden = i => i.hidden === true || (i.hidden !== false && S.settings?.autoHideAdult !== false && (i.autoAdult || i.meta?.adult));
+const hasArt = i => !!(i.meta?.poster || i.meta?.backdrop);
+const artFirst = list => [...list.filter(hasArt), ...list.filter(i => !hasArt(i))];
+const NEW_DAYS = 14;
+const isNew = i => Date.now() - addedAt(i) < NEW_DAYS * 864e5 && !watchedAll(i);
+function splitItems() {
+  S.items = S.allItems.filter(i => !isHidden(i));
+  S.hiddenItems = S.allItems.filter(isHidden);
+}
 if (api.platform === 'win32') document.body.classList.add('win');
 
 /* ================= Data helpers ================= */
@@ -98,7 +108,7 @@ function cardHtml(it, i = 0, land = false) {
   return `<button class="card ${land ? 'land' : ''}" data-id="${esc(it.id)}" style="--i:${i}" aria-label="${esc(m.title || it.title)}">
     <div class="poster">${art}
       ${r ? `<span class="badge-rating">${icon('star')}${r}</span>` : ''}
-      ${watchedAll(it) ? `<span class="watched" title="Watched">${icon('check')}</span>` : ''}
+      ${watchedAll(it) ? `<span class="watched" title="Watched">${icon('check')}</span>` : (isNew(it) ? '<span class="new-badge">New</span>' : '')}
       ${f > 0.01 && f < 0.95 ? `<span class="progress"><i style="transform:scaleX(${f})"></i></span>` : ''}
       <span class="play-chip">${icon('play')}</span>
     </div>
@@ -173,7 +183,8 @@ function homeHtml() {
   }
   const movies = all.filter(i => i.type === 'movie');
   const shows = all.filter(i => i.type === 'tv');
-  const recent = [...all].sort((a, b) => addedAt(b) - addedAt(a)).slice(0, 20);
+  const recent = artFirst([...all].sort((a, b) => addedAt(b) - addedAt(a)).slice(0, 20));
+  const fresh = all.filter(isNew).sort((a, b) => addedAt(b) - addedAt(a));
   const rated = all.filter(i => i.meta?.poster && ratingValue(i)).sort((a, b) => ratingValue(b) - ratingValue(a)).slice(0, 14);
   const cont = continueList();
   let out = heroHtml();
@@ -181,12 +192,13 @@ function homeHtml() {
   if (!hasKey('tmdbKey')) {
     out += `<div class="banner reveal in"><p><b>Posters and details are off.</b> Add a free TMDB key and Showtrove fills in posters, cast and ratings for all ${all.length} titles.</p><button class="btn primary sm" data-act="settings">Add TMDB key</button></div>`;
   }
-  if (cont.length) out += rowHtml('Continue watching', cont.map(wideCardHtml).join(''));
-  if (rated.length >= 4) out += spotlightHtml(rated);
   const L = (it, i) => cardHtml(it, i, true);
-  out += rowHtml('Recently added', recent.map(L).join(''));
-  if (movies.length) out += rowHtml('Movies', movies.sort((a, b) => addedAt(b) - addedAt(a)).slice(0, 24).map((it, i) => cardHtml(it, i)).join(''), 'movies');
-  if (shows.length) out += rowHtml('TV shows', shows.sort((a, b) => addedAt(b) - addedAt(a)).slice(0, 24).map((it, i) => cardHtml(it, i)).join(''), 'tv');
+  if (cont.length) out += rowHtml('Continue watching', cont.map(wideCardHtml).join(''));
+  if (fresh.length) out += rowHtml(`Newly added · ${fresh.length}`, fresh.slice(0, 30).map(L).join(''), 'new');
+  if (rated.length >= 4) out += spotlightHtml(rated);
+  if (!fresh.length) out += rowHtml('Recently added', recent.map(L).join(''));
+  if (movies.length) out += rowHtml('Movies', artFirst(movies.sort((a, b) => addedAt(b) - addedAt(a))).slice(0, 24).map((it, i) => cardHtml(it, i)).join(''), 'movies');
+  if (shows.length) out += rowHtml('TV shows', artFirst(shows.sort((a, b) => addedAt(b) - addedAt(a))).slice(0, 24).map((it, i) => cardHtml(it, i)).join(''), 'tv');
 
   const cols = {};
   for (const it of movies) if (it.meta?.collectionId) (cols[it.meta.collectionId] ||= []).push(it);
@@ -353,31 +365,45 @@ function bindSpotlight() {
 function libraryHtml(kind) {
   const type = kind === 'tv' ? 'tv' : 'movie';
   const f = S.lib[kind];
-  const pool = S.items.filter(i => i.type === type);
+  const showHidden = kind === 'movies' && f.hidden && S.hiddenUnlocked;
+  const pool = showHidden ? S.hiddenItems : S.items.filter(i => i.type === type);
   const genres = ['All', ...[...new Set(pool.flatMap(i => i.meta?.genres || []))].sort()];
   if (!genres.includes(f.genre)) f.genre = 'All';
   let list = f.genre === 'All' ? pool : pool.filter(i => i.meta?.genres?.includes(f.genre));
+  const yr = i => +(i.meta?.year || i.year) || 0;
+  const years = [...new Set(pool.map(yr).filter(Boolean))].sort((a, b) => b - a);
+  const decades = [...new Set(years.map(y => Math.floor(y / 10) * 10))];
+  if (f.year !== 'all') {
+    const [kindY, n] = [f.year[0], +f.year.slice(1)];
+    list = list.filter(i => kindY === 'd' ? Math.floor(yr(i) / 10) * 10 === n : yr(i) === n);
+  }
   const sorters = {
     added: (a, b) => addedAt(b) - addedAt(a),
     title: (a, b) => sortTitle(a).localeCompare(sortTitle(b)),
     year: (a, b) => (b.meta?.year || b.year || 0) - (a.meta?.year || a.year || 0),
     rating: (a, b) => (ratingValue(b) || 0) - (ratingValue(a) || 0)
   };
-  list = [...list].sort(sorters[f.sort]);
-  const label = kind === 'tv' ? 'TV shows' : 'Movies';
+  list = artFirst([...list].sort(sorters[f.sort]));
+  const label = showHidden ? 'Hidden' : kind === 'tv' ? 'TV shows' : 'Movies';
   const noun = kind === 'tv' ? (list.length === 1 ? 'show' : 'shows') : (list.length === 1 ? 'movie' : 'movies');
+  const yearSel = `<label class="select"><span>Year</span><select id="yearSel">
+        <option value="all">All years</option>
+        ${decades.map(d => `<option value="d${d}" ${f.year === 'd' + d ? 'selected' : ''}>${d}s</option>${years.filter(y => Math.floor(y / 10) * 10 === d).map(y => `<option value="y${y}" ${f.year === 'y' + y ? 'selected' : ''}>&nbsp;&nbsp;${y}</option>`).join('')}`).join('')}
+      </select></label>`;
+  const hiddenTab = kind === 'movies' && (S.hiddenItems?.length || f.hidden) ? `<button class="chip lock-chip" data-act="hidden" aria-pressed="${showHidden}">${icon(showHidden ? 'eye' : 'lock')}Hidden</button>` : '';
   return `<div class="page">
-    <div class="page-head"><h1>${label}</h1><span class="count">${list.length} ${noun}</span></div>
-    ${pool.length ? `<div class="toolbar">
+    <div class="page-head"><h1>${label}</h1><span class="count">${list.length} ${noun}</span>
+      ${showHidden ? `<button class="btn quiet sm" data-act="lock">${icon('lock')}Lock and go back</button>` : ''}</div>
+    ${pool.length ? `<div class="toolbar">${hiddenTab}
       <div class="chips" role="group" aria-label="Filter by genre">${genres.map(g => `<button class="chip" data-genre="${esc(g)}" aria-pressed="${g === f.genre}">${esc(g)}</button>`).join('')}</div>
       <label class="select"><span>Sort by</span><select id="sortSel">
         <option value="added" ${f.sort === 'added' ? 'selected' : ''}>Recently added</option>
         <option value="title" ${f.sort === 'title' ? 'selected' : ''}>Title A–Z</option>
         <option value="year" ${f.sort === 'year' ? 'selected' : ''}>Release year</option>
         <option value="rating" ${f.sort === 'rating' ? 'selected' : ''}>Highest rated</option>
-      </select></label></div>
-      <div class="grid">${list.map((it, i) => cardHtml(it, i)).join('')}</div>`
-    : `<div class="inline-empty"><h2>No ${label.toLowerCase()} yet</h2><p>${kind === 'tv' ? 'Name episode files like “Show Name S01E02.mkv” or keep them in “Show/Season 1/” folders and they’ll show up here.' : 'Movies you add to your folders will show up here.'}</p><button class="btn primary sm" data-act="add-folder">${icon('folder')}Add a folder</button></div>`}
+      </select></label>${yearSel}</div>
+      ${list.length ? `<div class="grid">${list.map((it, i) => cardHtml(it, i)).join('')}</div>` : `<div class="inline-empty"><h2>Nothing here</h2><p>No titles match this genre and year.</p></div>`}`
+    : hiddenTab ? `<div class="toolbar">${hiddenTab}</div><div class="inline-empty"><h2>No ${label.toLowerCase()} yet</h2></div>` : `<div class="inline-empty"><h2>No ${label.toLowerCase()} yet</h2><p>${kind === 'tv' ? 'Name episode files like “Show Name S01E02.mkv” or keep them in “Show/Season 1/” folders and they’ll show up here.' : 'Movies you add to your folders will show up here.'}</p><button class="btn primary sm" data-act="add-folder">${icon('folder')}Add a folder</button></div>`}
   </div>`;
 }
 
@@ -411,6 +437,8 @@ function bindCommon(root) {
   });
   const sel = $('#sortSel', root);
   if (sel) sel.onchange = () => { S.lib[S.view].sort = sel.value; render(); };
+  const ysel = $('#yearSel', root);
+  if (ysel) { ysel.value = S.lib[S.view].year; ysel.onchange = () => { S.lib[S.view].year = ysel.value; render(); }; }
 }
 
 // One delegated click handler for the whole app
@@ -425,6 +453,8 @@ document.addEventListener('click', e => {
   if (t.dataset.open) return openDetail(t.dataset.open);
   if (t.dataset.goto) return go(t.dataset.goto);
   if (t.dataset.genre) { S.lib[S.view].genre = t.dataset.genre; return render(); }
+  if (t.dataset.act === 'hidden') { e.preventDefault(); return toggleHiddenTab(); }
+  if (t.dataset.act === 'lock') { S.hiddenUnlocked = false; S.lib.movies.hidden = false; render(); return toast('Hidden titles locked'); }
   if (t.classList.contains('card')) return openDetail(t.dataset.id);
   const act = t.dataset.act;
   if (act === 'add-folder') addFolder();
@@ -434,6 +464,8 @@ document.addEventListener('click', e => {
 
 /* ================= Navigation ================= */
 function go(view) {
+  if (view !== 'movies' && S.hiddenUnlocked) { S.hiddenUnlocked = false; S.lib.movies.hidden = false; } // leaving Movies locks Hidden again
+  if (view === 'new') { S.lib.movies.sort = 'added'; S.lib.movies.year = 'all'; view = 'movies'; }
   if (view === S.view && view !== 'search') { window.scrollTo({ top: 0, behavior: 'smooth' }); return; }
   const from = VIEWS.indexOf(S.view), to = VIEWS.indexOf(view);
   if (view !== 'search') { S.lastView = view; if (S.query) { S.query = ''; $('#searchInput').value = ''; } }
@@ -549,6 +581,7 @@ function openDetail(id, { keepSeason } = {}) {
         ${m.trailerKey ? `<button class="btn ghost" id="dTrailer">${icon('trailer')}Trailer</button>` : ''}
         ${it.type === 'movie' ? `<button class="btn quiet" id="dWatched">${icon(watchedAll(it) ? 'check' : 'eye')}${watchedAll(it) ? 'Watched' : 'Mark as watched'}</button>` : ''}
         <button class="btn quiet" id="dFix">${icon('wand')}Fix match</button>
+        <button class="btn quiet" id="dHide">${icon(isHidden(it) ? 'eye' : 'lock')}${isHidden(it) ? 'Unhide' : 'Hide'}</button>
         <button class="btn quiet" id="dRefresh">${icon('refresh')}Refresh info</button>
       </div>
       ${m.overview ? `<p class="overview">${esc(m.overview)}</p>` : ''}
@@ -570,6 +603,12 @@ function openDetail(id, { keepSeason } = {}) {
   $('#dPlayWith').onclick = e => { const ep = go1(); startPlay(id, ep?.season, ep?.episode, e.currentTarget, true); };
   $('#dTrailer') && ($('#dTrailer').onclick = () => api.openExternal(`https://www.youtube.com/watch?v=${m.trailerKey}`));
   $('#dFix').onclick = () => openFixMatch(it);
+  $('#dHide').onclick = async () => {
+    const hide = !isHidden(it);
+    if (hide && !(await api.pinStatus()).set) { const ok = await pinFlow('create'); if (!ok) return; }
+    applyState(await api.setHidden(id, hide)); closeDetail();
+    toast(hide ? 'Moved to Movies → Hidden' : 'Back in your library', 'ok');
+  };
   $('#dRefresh').onclick = async e => {
     const b = e.currentTarget; b.disabled = true; b.innerHTML = `${icon('refresh')}Refreshing…`; b.querySelector('.ic').style.animation = 'spin 1s linear infinite';
     await api.refreshItem(id); toast('Details updated', 'ok');
@@ -739,6 +778,10 @@ function openSettings(tab = 'general') {
           <div class="folder-list">${S.folders.map(f => { const r = S.scanReport?.folders?.find(x => x.root === f); return `<div class="folder">${icon('folder')}<div class="f-info"><code title="${esc(f)}">${esc(f)}</code><small>${r ? (r.online ? `${r.movies} movies · ${r.shows} shows (${r.episodes} episodes)` : '<span class="warn">Not connected right now. Its titles are kept until you plug it back in</span>') : 'Not scanned yet'}</small></div><button class="btn quiet sm danger" data-rm="${esc(f)}">Remove</button></div>`; }).join('') || '<p class="hint">No folders yet.</p>'}</div>
           <div><button class="btn ghost sm" data-act="add-folder">${icon('folder')}Add a folder</button></div>
         </section>
+        <section class="group"><h3>Hidden titles</h3><p class="hint">Hidden titles only show in Movies → Hidden, behind your PIN. They never appear on Home, in search or in rows.</p>
+          ${tog('sAutoHide', s.autoHideAdult !== false, 'Hide adult videos automatically', 'Based on file and folder names like XXX, and TMDB\'s adult flag')}
+          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center"><span class="hint-s">${S.hiddenItems?.length || 0} hidden</span><button class="btn ghost sm" id="sPin">${icon('lock')}Set or change PIN</button></div>
+        </section>
         <section class="group"><h3>Tidy up</h3>
           <div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn ghost sm" id="sRescan">${icon('folder')}Rescan folders now</button><button class="btn ghost sm" id="sRefreshAll">${icon('refresh')}Re-download all posters and details</button></div>
         </section>
@@ -814,6 +857,7 @@ function openSettings(tab = 'general') {
     applyState(await api.removeFolder(b.dataset.rm)); openSettings('library'); toast('Folder removed. Your files are untouched.');
   });
   $$('[data-browse]', m).forEach(b => b.onclick = async () => { const p = await api.browseExe(); if (p) $('#' + b.dataset.browse).value = p; });
+  $('#sPin').onclick = async () => { const { set } = await api.pinStatus(); closeModal(); await pinFlow(set ? 'change' : 'create'); };
   $$('[data-fix]', m).forEach(b => b.onclick = () => { const it = byId(b.dataset.fix); closeModal(); if (it) openFixMatch(it); });
   $$('.skip-row [data-reveal]', m).forEach(b => b.onclick = e => { e.preventDefault(); e.stopPropagation(); api.showInFolder(b.dataset.reveal); });
   $('#sRefreshAll').onclick = () => { api.refreshAll(); toast('Re-downloading details in the background'); };
@@ -830,7 +874,7 @@ function openSettings(tab = 'general') {
     if (tm && !/^[A-Za-z0-9._-]{20,}$/.test(tm)) { showTab('advanced'); const f = $('#sTmdb'); f.classList.remove('shake'); void f.offsetWidth; f.classList.add('shake'); toast('That TMDB key looks incomplete. Paste the whole key.'); return; }
     try { localStorage.setItem('cv-subsize', $('#sSubSize').value); } catch { /* ignore */ }
     const st = await api.saveSettings({
-      startView: $('#sStart').value, heroAutoplay: $('#sHeroAuto').checked, heroSpeed: +$('#sHeroSpeed').value,
+      autoHideAdult: $('#sAutoHide').checked, startView: $('#sStart').value, heroAutoplay: $('#sHeroAuto').checked, heroSpeed: +$('#sHeroSpeed').value,
       reduceMotion: $('#sReduce').checked, metadataLanguage: $('#sMetaLang').value, autoNext: $('#sAutoNext').checked,
       tmdbKey: tm, omdbKey: $('#sOmdb').value.trim(), fanartKey: $('#sFanart').value.trim(), subdlKey: $('#sSubdl').value.trim(),
       opensubtitlesKey: $('#sOsKey').value.trim(), opensubtitlesUser: $('#sOsUser').value.trim(), opensubtitlesPass: $('#sOsPass').value,
@@ -841,12 +885,62 @@ function openSettings(tab = 'general') {
   };
 }
 
+/* ---------- Hidden titles: PIN lock ---------- */
+async function toggleHiddenTab() {
+  const f = S.lib.movies;
+  if (f.hidden && S.hiddenUnlocked) { f.hidden = false; S.hiddenUnlocked = false; return render(); }
+  const { set } = await api.pinStatus();
+  const ok = await pinFlow(set ? 'enter' : 'create');
+  if (!ok) return;
+  S.hiddenUnlocked = true; f.hidden = true; f.genre = 'All'; f.year = 'all'; render();
+}
+// mode: 'enter' | 'create' | 'change'. Resolves true when done.
+function pinFlow(mode) {
+  return new Promise(resolve => {
+    let step = mode === 'change' ? 'old' : mode === 'create' ? 'new' : 'enter', oldPin = '', first = '';
+    const title = () => ({ enter: 'Enter your PIN', old: 'Enter your current PIN', new: mode === 'change' ? 'Choose a new PIN' : 'Create a PIN for Hidden', confirm: 'Type it again' })[step];
+    const sub = () => step === 'new' ? '4 to 8 digits. You\'ll need it every time you open Hidden.' : step === 'enter' ? 'Hidden titles are locked.' : '';
+    const m = openModal(`<div class="modal-head"><h2 id="pinT"></h2><button class="icon-btn" data-close aria-label="Close">${icon('x')}</button></div>
+      <div class="modal-body pin-body"><p class="hint" id="pinS"></p>
+        <input class="input pin-input" id="pinIn" type="password" inputmode="numeric" maxlength="8" autocomplete="off" aria-label="PIN">
+        <p class="err" id="pinE" hidden></p>
+        <div class="pin-pad">${[1, 2, 3, 4, 5, 6, 7, 8, 9, '⌫', 0, '✓'].map(k => `<button class="pin-k" data-k="${k}">${k}</button>`).join('')}</div>
+      </div>`);
+    m.classList.add('pin-modal');
+    const inp = $('#pinIn', m), err = $('#pinE', m);
+    const paint = () => { $('#pinT', m).textContent = title(); $('#pinS', m).textContent = sub(); inp.value = ''; inp.focus(); };
+    const fail = msg => { err.hidden = false; err.textContent = msg; inp.classList.remove('shake'); void inp.offsetWidth; inp.classList.add('shake'); inp.value = ''; };
+    const done = v => { closeModal(); resolve(v); };
+    const submit = async () => {
+      const v = inp.value.trim(); err.hidden = true;
+      if (!/^\d{4,8}$/.test(v)) return fail('Use 4 to 8 numbers');
+      if (step === 'enter') return (await api.pinCheck(v)) ? done(true) : fail('Wrong PIN');
+      if (step === 'old') { if (!(await api.pinCheck(v))) return fail('Wrong PIN'); oldPin = v; step = 'new'; return paint(); }
+      if (step === 'new') { first = v; step = 'confirm'; return paint(); }
+      if (step === 'confirm') {
+        if (v !== first) { step = 'new'; paint(); return fail('Those didn\'t match. Try again'); }
+        const ok = await api.pinSet(v, oldPin);
+        if (!ok) return fail('Could not save the PIN');
+        toast(mode === 'change' ? 'PIN changed' : 'PIN set', 'ok'); return done(true);
+      }
+    };
+    $$('[data-close]', m).forEach(b => b.onclick = () => done(false));
+    $$('[data-k]', m).forEach(b => b.onclick = () => {
+      const k = b.dataset.k;
+      if (k === '⌫') inp.value = inp.value.slice(0, -1); else if (k === '✓') submit(); else if (inp.value.length < 8) inp.value += k;
+      inp.focus();
+    });
+    inp.onkeydown = e => { if (e.key === 'Enter') submit(); };
+    paint();
+  });
+}
+
 /* Settings → Library: counts, what's not showing and why */
 function libraryReportHtml() {
   const movies = S.items.filter(i => i.type === 'movie'), shows = S.items.filter(i => i.type === 'tv');
   const eps = shows.reduce((n, i) => n + Object.keys(i.episodes || {}).length, 0);
   const rep = S.scanReport;
-  const unmatched = S.items.filter(i => i.metaStatus === 'notfound' || i.metaStatus === 'error');
+  const unmatched = S.items.filter(i => i.metaStatus === 'notfound' || i.metaStatus === 'error'); // hidden ones stay private
   const groups = {};
   for (const x of rep?.skipped || []) (groups[x.reason] ||= []).push(x.path);
   const skippedN = rep?.skippedCount || 0;
@@ -905,7 +999,8 @@ function applyState(st) {
   window.__players = st.players;
   document.body.classList.toggle('reduce-motion', !!st.settings?.reduceMotion);
   document.body.classList.toggle('no-hero-auto', st.settings?.heroAutoplay === false);
-  Object.assign(S, { items: st.items, progress: st.progress, settings: st.settings, builtIn: st.builtIn || [], scanReport: st.scanReport || null, players: st.players, folders: st.folders, online: st.online });
+  Object.assign(S, { allItems: st.items, progress: st.progress, settings: st.settings, builtIn: st.builtIn || [], scanReport: st.scanReport || null, players: st.players, folders: st.folders, online: st.online });
+  splitItems();
   render();
 }
 function refreshCards(id) {
@@ -918,10 +1013,17 @@ function refreshCards(id) {
   });
 }
 
-api.onLibrary(st => { const was = S.items.length; applyState(st); if (st.items.length > was && was) toast(`${st.items.length - was} new title${st.items.length - was > 1 ? 's' : ''} added`, 'ok'); });
+api.onLibrary(st => {
+  const was = S.items.length; applyState(st);
+  const now = S.items.length;
+  if (now > was && was) toast(`${now - was} new title${now - was > 1 ? 's' : ''} added`, 'ok');
+});
 api.onItem(it => {
-  const i = S.items.findIndex(x => x.id === it.id);
-  if (i >= 0) S.items[i] = it; else S.items.push(it);
+  const i = S.allItems.findIndex(x => x.id === it.id);
+  if (i >= 0) S.allItems[i] = it; else S.allItems.push(it);
+  const wasHidden = S.hiddenItems?.some(x => x.id === it.id);
+  splitItems();
+  if (wasHidden !== isHidden(it)) render();
   refreshCards(it.id);
   if (S.detailId === it.id) openDetail(it.id, { keepSeason: +($('#detailLayer [data-season][aria-pressed="true"]')?.dataset.season) || undefined });
 });

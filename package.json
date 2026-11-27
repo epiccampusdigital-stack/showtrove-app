@@ -1,7 +1,7 @@
 {
   "name": "showtrove",
   "productName": "Showtrove",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "Your own treasure chest of movies and shows, offline-first",
   "main": "src/main/main.js",
   "author": "EPIC",
