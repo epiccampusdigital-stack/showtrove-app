@@ -62,7 +62,7 @@ Font: Switzer by Indian Type Foundry (Fontshare, free for commercial use), bundl
 Every installed copy checks GitHub for a new version when it opens (and every 4 hours), downloads it in the background, and asks the user to restart.
 
 1. Make the change and bump `version` in `package.json` (e.g. 1.0.1 → 1.0.2).
-2. Commit, then tag and push:
+2. Commit and push to main. Changing package.json on main starts the release build (a v* tag works too):
    ```
    git commit -am "Showtrove 1.0.2"
    git tag v1.0.2

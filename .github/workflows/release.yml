@@ -1,8 +1,11 @@
 # Builds the Windows installer and publishes it as a GitHub Release.
-# Trigger: push a tag like v1.0.2  (git tag v1.0.2 && git push --tags)
+# Runs when package.json changes on main (i.e. the version was bumped), on a v* tag, or by hand.
+# If a release for the current version already exists, electron-builder skips publishing.
 name: Release
 on:
   push:
+    branches: [main]
+    paths: ['package.json']
     tags: ['v*']
   workflow_dispatch:
 permissions:

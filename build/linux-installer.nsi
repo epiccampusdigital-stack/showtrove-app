@@ -1,4 +1,4 @@
-; Showtrove installer. Build: makensis -DVERSION=1.0.0 -DSRC=dist/win-unpacked -DOUT=dist/Showtrove-Setup-1.0.0.exe build/installer.nsi
+; Showtrove installer. Build: makensis -DVERSION=1.0.0 -DSRC=dist/win-unpacked -DOUT=dist/Showtrove-Setup-1.0.0.exe build/linux-installer.nsi
 Unicode true
 !include "MUI2.nsh"
 
