@@ -47,8 +47,8 @@
     "publish": [
       {
         "provider": "github",
-        "owner": "coreframeagency",
-        "repo": "showstrove-app",
+        "owner": "epiccampusdigital-stack",
+        "repo": "showtrove-app",
         "releaseType": "release"
       }
     ]
@@ -58,6 +58,6 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/coreframeagency/showstrove-app.git"
+    "url": "https://github.com/epiccampusdigital-stack/showtrove-app.git"
   }
 }
