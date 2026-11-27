@@ -30,7 +30,14 @@ class Store {
     fs.renameSync(tmp, this.file); // atomic-ish: never leaves a half-written library
   }
 
+  // What the app actually uses: your own keys, falling back to the built-in ones
   get settings() {
+    const s = this.userSettings, builtIn = require('./builtin-keys');
+    for (const k of Object.keys(builtIn)) if (!s[k]) s[k] = builtIn[k];
+    return s;
+  }
+  // Only what was typed in Settings (shown in the Settings screen)
+  get userSettings() {
     return {
       tmdbKey: '', omdbKey: '', fanartKey: '', subdlKey: '', opensubtitlesKey: '', opensubtitlesUser: '', opensubtitlesPass: '',
       subtitleLanguages: 'en', autoSubtitles: true,

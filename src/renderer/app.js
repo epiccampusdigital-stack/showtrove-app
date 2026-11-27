@@ -15,7 +15,8 @@ if (api.platform === 'win32') document.body.classList.add('win');
 /* ================= Data helpers ================= */
 const sortTitle = i => (i.meta?.title || i.title).replace(/^(the|a|an)\s+/i, '').toLowerCase();
 const addedAt = i => Math.max(i.addedAt || 0, i.latestAt || 0);
-const isLoading = i => S.metaBusy && i.metaStatus === 'pending' && S.settings.tmdbKey;
+const hasKey = k => !!(S.settings?.[k] || S.builtIn?.includes(k));
+const isLoading = i => S.metaBusy && i.metaStatus === 'pending' && hasKey('tmdbKey');
 const filesOf = i => i.type === 'tv' ? Object.values(i.episodes).map(e => e.path) : i.files;
 const sortedEps = i => Object.values(i.episodes).sort((a, b) => a.season - b.season || a.episode - b.episode);
 const prog = f => S.progress[f];
@@ -177,7 +178,7 @@ function homeHtml() {
   const cont = continueList();
   let out = heroHtml();
 
-  if (!S.settings.tmdbKey) {
+  if (!hasKey('tmdbKey')) {
     out += `<div class="banner reveal in"><p><b>Posters and details are off.</b> Add a free TMDB key and Showtrove fills in posters, cast and ratings for all ${all.length} titles.</p><button class="btn primary sm" data-act="settings">Add TMDB key</button></div>`;
   }
   if (cont.length) out += rowHtml('Continue watching', cont.map(wideCardHtml).join(''));
@@ -710,7 +711,7 @@ function openSettings() {
         <div><button class="btn ghost sm" data-act="add-folder">${icon('folder')}Add a folder</button></div>
       </section>
 
-      <section class="group"><h3>Posters, details and ratings</h3><p class="hint">Free keys. They're saved only on this PC.</p>
+      <section class="group"><h3>Posters, details and ratings</h3><p class="hint">${S.builtIn?.length ? 'Showtrove comes with its own keys, so you can leave these empty. Paste your own key to use it instead.' : "Free keys. They're saved only on this PC."}</p>
         <label class="field"><span>TMDB API key</span><input class="input" id="sTmdb" value="${esc(s.tmdbKey)}" spellcheck="false" autocomplete="off" placeholder="e.g. 3f2a… (API key or read access token)">
           <small>Posters, cast, plot, episodes. Get one at <a data-link="https://www.themoviedb.org/settings/api">themoviedb.org → Settings → API</a></small></label>
         <label class="field"><span>OMDb API key</span><input class="input" id="sOmdb" value="${esc(s.omdbKey)}" spellcheck="false" autocomplete="off" placeholder="e.g. a1b2c3d4">
@@ -757,6 +758,11 @@ function openSettings() {
     <div class="modal-foot"><button class="btn quiet" data-close>Cancel</button><button class="btn primary" id="sSave">${icon('check')}Save settings</button></div>`);
 
   $$('[data-close]', m).forEach(b => b.onclick = closeModal);
+  // Keys that ship with the app: show that they're covered, let people paste their own to override
+  for (const [id, k] of [['sTmdb', 'tmdbKey'], ['sOmdb', 'omdbKey'], ['sFanart', 'fanartKey'], ['sSubdl', 'subdlKey'], ['sOsKey', 'opensubtitlesKey']]) {
+    const el = $('#' + id, m);
+    if (el && !s[k] && S.builtIn?.includes(k)) { el.placeholder = 'Built in ✓  (leave empty, or paste your own key)'; el.classList.add('built-in'); }
+  }
   $$('[data-link]', m).forEach(a => a.onclick = () => api.openExternal(a.dataset.link));
   $$('[data-rm]', m).forEach(b => b.onclick = async () => {
     if (b.dataset.confirm !== '1') { b.dataset.confirm = '1'; b.textContent = 'Click again to remove'; return; }
@@ -801,7 +807,7 @@ function openFixMatch(it) {
   $$('[data-t]', m).forEach(b => b.onclick = () => { type = b.dataset.t; $$('[data-t]', m).forEach(x => x.setAttribute('aria-pressed', String(x === b))); search(); });
   const search = async () => {
     const box = $('#fmRes');
-    if (!S.settings.tmdbKey) { box.innerHTML = '<p class="err">Add your TMDB key in Settings first.</p>'; return; }
+    if (!hasKey('tmdbKey')) { box.innerHTML = '<p class="err">Add your TMDB key in Settings first.</p>'; return; }
     box.innerHTML = Array.from({ length: 6 }, () => '<div class="result"><div class="poster"><div class="fallback loading"></div></div></div>').join('');
     try {
       const res = await api.searchTmdb($('#fmQ').value, type);
@@ -821,7 +827,7 @@ function openFixMatch(it) {
 /* ================= Live updates ================= */
 function applyState(st) {
   window.__players = st.players;
-  Object.assign(S, { items: st.items, progress: st.progress, settings: st.settings, players: st.players, folders: st.folders, online: st.online });
+  Object.assign(S, { items: st.items, progress: st.progress, settings: st.settings, builtIn: st.builtIn || [], players: st.players, folders: st.folders, online: st.online });
   render();
 }
 function refreshCards(id) {

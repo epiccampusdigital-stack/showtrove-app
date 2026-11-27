@@ -66,7 +66,8 @@ function stateForUi() {
     items: Object.values(store.data.items),
     folders: store.data.folders,
     progress: store.data.progress,
-    settings: store.settings,
+    settings: store.userSettings,
+    builtIn: Object.keys(require('./builtin-keys')),
     players: detectPlayers(store.settings).map(({ id, name }) => ({ id, name })),
     online: net.isOnline()
   };

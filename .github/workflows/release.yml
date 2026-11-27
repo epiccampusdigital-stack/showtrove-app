@@ -21,6 +21,17 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
+      # Bake the app's API keys in from repo Secrets (never committed; empty secrets are skipped)
+      - name: Write built-in API keys
+        shell: bash
+        env:
+          TMDB_KEY: ${{ secrets.TMDB_KEY }}
+          OMDB_KEY: ${{ secrets.OMDB_KEY }}
+          FANART_KEY: ${{ secrets.FANART_KEY }}
+          SUBDL_KEY: ${{ secrets.SUBDL_KEY }}
+          OPENSUBTITLES_KEY: ${{ secrets.OPENSUBTITLES_KEY }}
+        run: |
+          node -e "const k={};for(const n of ['TMDB_KEY','OMDB_KEY','FANART_KEY','SUBDL_KEY','OPENSUBTITLES_KEY'])if(process.env[n])k[n]=process.env[n].trim();require('fs').writeFileSync('src/main/keys.json',JSON.stringify(k));console.log('Built-in keys:',Object.keys(k).join(', ')||'none')"
       - run: npx electron-builder --win nsis --x64 --publish always
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
