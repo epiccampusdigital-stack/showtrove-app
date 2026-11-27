@@ -272,7 +272,7 @@ ipcMain.handle('set-fullscreen', (_e, v) => { win.setFullScreen(!!v); });
 // ---------- App ----------
 function createWindow() {
   win = new BrowserWindow({
-    width: 1400, height: 880, minWidth: 960, minHeight: 600,
+    width: 1400, height: 880, minWidth: 640, minHeight: 480,
     backgroundColor: '#0b0b0f',
     title: 'Showtrove',
     icon: path.join(__dirname, '..', 'renderer', 'icon.png'),
@@ -282,6 +282,15 @@ function createWindow() {
   });
   win.setMenuBarVisibility(false);
   win.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
+  // Big screens: scale the whole interface up (like a TV app) instead of leaving it tiny
+  const fitZoom = () => {
+    if (win.isDestroyed()) return;
+    const [w, h] = win.getContentSize();
+    const z = Math.max(1, Math.min(1.6, Math.min(w / 1600, h / 1000)));
+    win.webContents.setZoomFactor(Math.round(z * 20) / 20);
+  };
+  win.on('resize', fitZoom);
+  win.webContents.on('did-finish-load', fitZoom);
   win.on('enter-full-screen', () => send('fullscreen', true));
   win.on('leave-full-screen', () => send('fullscreen', false));
 }

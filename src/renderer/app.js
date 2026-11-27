@@ -400,7 +400,7 @@ function libraryHtml(kind) {
         <option value="all">All years</option>
         ${decades.map(d => `<option value="d${d}" ${f.year === 'd' + d ? 'selected' : ''}>${d}s</option>${years.filter(y => Math.floor(y / 10) * 10 === d).map(y => `<option value="y${y}" ${f.year === 'y' + y ? 'selected' : ''}>&nbsp;&nbsp;${y}</option>`).join('')}`).join('')}
       </select></label>`;
-  const hiddenTab = kind === 'movies' && (S.hiddenItems?.length || f.hidden) ? `<button class="chip lock-chip" data-act="hidden" aria-pressed="${showHidden}">${icon(showHidden ? 'eye' : 'lock')}Hidden</button>` : '';
+  const hiddenTab = kind === 'movies' ? `<button class="chip lock-chip" data-act="hidden" aria-pressed="${showHidden}">${icon(showHidden ? 'eye' : 'lock')}Hidden</button>` : '';
   return `<div class="page">
     <div class="page-head"><h1>${label}</h1><span class="count">${list.length} ${noun}</span>
       ${showHidden ? `<button class="btn quiet sm" data-act="lock">${icon('lock')}Lock and go back</button>` : ''}</div>
@@ -413,7 +413,7 @@ function libraryHtml(kind) {
         <option value="rating" ${f.sort === 'rating' ? 'selected' : ''}>Highest rated</option>
       </select></label>${yearSel}</div>
       ${list.length ? `<div class="grid">${list.map((it, i) => cardHtml(it, i)).join('')}</div>` : `<div class="inline-empty"><h2>Nothing here</h2><p>No titles match this genre and year.</p></div>`}`
-    : hiddenTab ? `<div class="toolbar">${hiddenTab}</div><div class="inline-empty"><h2>No ${label.toLowerCase()} yet</h2></div>` : `<div class="inline-empty"><h2>No ${label.toLowerCase()} yet</h2><p>${kind === 'tv' ? 'Name episode files like “Show Name S01E02.mkv” or keep them in “Show/Season 1/” folders and they’ll show up here.' : 'Movies you add to your folders will show up here.'}</p><button class="btn primary sm" data-act="add-folder">${icon('folder')}Add a folder</button></div>`}
+    : showHidden ? `<div class="toolbar">${hiddenTab}</div><div class="inline-empty"><h2>Nothing hidden yet</h2><p>Open any title and press Hide, or keep adult videos in a folder named XXX or Adult.</p></div>` : `<div class="inline-empty"><h2>No ${label.toLowerCase()} yet</h2><p>${kind === 'tv' ? 'Name episode files like “Show Name S01E02.mkv” or keep them in “Show/Season 1/” folders and they’ll show up here.' : 'Movies you add to your folders will show up here.'}</p><button class="btn primary sm" data-act="add-folder">${icon('folder')}Add a folder</button></div>`}
   </div>`;
 }
 
@@ -736,17 +736,24 @@ function closePopover(val = null) {
 }
 
 /* ================= Modals ================= */
-function openModal(inner) {
+let modalCloseT = 0, modalOnClose = null;
+function openModal(inner, onClose = null) {
   const L = $('#modalLayer');
+  clearTimeout(modalCloseT); // a modal that was still closing must not wipe this one
+  const prev = modalOnClose; modalOnClose = null; prev?.();
   L.innerHTML = `<div class="modal" role="dialog" aria-modal="true">${inner}</div>`;
   L.hidden = false; L.classList.remove('out');
   L.onmousedown = e => { if (e.target === L) closeModal(); };
+  modalOnClose = onClose;
   setTimeout(() => $('input, button.primary', L)?.focus(), 30);
   return $('.modal', L);
 }
 function closeModal() {
   const L = $('#modalLayer'); if (L.hidden) return;
-  L.classList.add('out'); setTimeout(() => { L.hidden = true; L.innerHTML = ''; L.classList.remove('out'); }, 170);
+  const cb = modalOnClose; modalOnClose = null; cb?.();
+  L.classList.add('out');
+  clearTimeout(modalCloseT);
+  modalCloseT = setTimeout(() => { L.hidden = true; L.innerHTML = ''; L.classList.remove('out'); }, 170);
 }
 
 async function addFolder() {
@@ -908,7 +915,7 @@ function flagChips(pool, f) {
   const on = f.flag !== 'off';
   return `<div class="chips flag-chips" role="group" aria-label="Flags">
     <button class="chip" data-flagf="${on ? 'off' : 'all'}" aria-pressed="${on}">${icon('flag')}Flagged · ${n}</button>
-    ${on ? Object.entries(FLAGS).map(([k, l]) => `<button class="chip p-${k}" data-flagf="${f.flag === k ? 'all' : k}" aria-pressed="${f.flag === k}"><i class="dot"></i>${l}</button>`).join('') : ''}
+    ${on ? Object.entries(FLAGS).map(([k, l]) => `<button class="chip p-${k}" data-flagf="${f.flag === k ? 'all' : k}" aria-pressed="${f.flag === k}"><i class="pdot"></i>${l}</button>`).join('') : ''}
   </div>`;
 }
 function openFlagMenu(id, anchor) {
@@ -917,7 +924,7 @@ function openFlagMenu(id, anchor) {
   const cur = it.flag?.level || null;
   const menu = html(`<div class="flag-menu" role="menu">
     <small>Flag as</small>
-    ${Object.entries(FLAGS).map(([k, l]) => `<button role="menuitemradio" aria-checked="${cur === k}" data-lv="${k}" class="p-${k}"><i class="dot"></i>${l} priority${cur === k ? icon('check') : ''}</button>`).join('')}
+    ${Object.entries(FLAGS).map(([k, l]) => `<button role="menuitemradio" aria-checked="${cur === k}" data-lv="${k}" class="p-${k}"><i class="pdot"></i>${l} priority${cur === k ? icon('check') : ''}</button>`).join('')}
     ${cur ? `<button data-lv="" class="clear">${icon('x')}Remove flag</button>` : ''}
   </div>`);
   document.body.append(menu);
@@ -953,7 +960,9 @@ async function toggleHiddenTab() {
 }
 // mode: 'enter' | 'create' | 'change'. Resolves true when done.
 function pinFlow(mode) {
-  return new Promise(resolve => {
+  return new Promise(res => {
+    let settled = false;
+    const resolve = v => { if (!settled) { settled = true; res(v); } };
     let step = mode === 'change' ? 'old' : mode === 'create' ? 'new' : 'enter', oldPin = '', first = '';
     const title = () => ({ enter: 'Enter your PIN', old: 'Enter your current PIN', new: mode === 'change' ? 'Choose a new PIN' : 'Create a PIN for Hidden', confirm: 'Type it again' })[step];
     const sub = () => step === 'new' ? '4 to 8 digits. You\'ll need it every time you open Hidden.' : step === 'enter' ? 'Hidden titles are locked.' : '';
@@ -962,12 +971,12 @@ function pinFlow(mode) {
         <input class="input pin-input" id="pinIn" type="password" inputmode="numeric" maxlength="8" autocomplete="off" aria-label="PIN">
         <p class="err" id="pinE" hidden></p>
         <div class="pin-pad">${[1, 2, 3, 4, 5, 6, 7, 8, 9, '⌫', 0, '✓'].map(k => `<button class="pin-k" data-k="${k}">${k}</button>`).join('')}</div>
-      </div>`);
+      </div>`, () => resolve(false));
     m.classList.add('pin-modal');
     const inp = $('#pinIn', m), err = $('#pinE', m);
     const paint = () => { $('#pinT', m).textContent = title(); $('#pinS', m).textContent = sub(); inp.value = ''; inp.focus(); };
     const fail = msg => { err.hidden = false; err.textContent = msg; inp.classList.remove('shake'); void inp.offsetWidth; inp.classList.add('shake'); inp.value = ''; };
-    const done = v => { closeModal(); resolve(v); };
+    const done = v => { resolve(v); closeModal(); };
     const submit = async () => {
       const v = inp.value.trim(); err.hidden = true;
       if (!/^\d{4,8}$/.test(v)) return fail('Use 4 to 8 numbers');
